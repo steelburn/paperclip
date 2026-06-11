@@ -256,6 +256,11 @@ function RemovableIssueReferencePill({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const issueLabel = issue.identifier ?? issue.title;
   const confirmLabel = issue.identifier ? `${issue.identifier}: ${issue.title}` : issue.title;
+  const chipClassName = cn(
+    "paperclip-mention-chip paperclip-mention-chip--issue",
+    "inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs no-underline",
+    issue.identifier && "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring",
+  );
   const content = (
     <>
       <StatusIcon status={issue.status} className="h-3 w-3 shrink-0" />
@@ -275,18 +280,10 @@ function RemovableIssueReferencePill({
 
   return (
     <>
-      <span
-        data-mention-kind="issue"
-        className={cn(
-          "paperclip-mention-chip paperclip-mention-chip--issue group",
-          "inline-flex items-center gap-1 rounded-full border border-border py-0.5 pl-1 pr-2 text-xs",
-        )}
-        title={issue.title}
-        aria-label={`Task ${issueLabel}: ${issue.title}`}
-      >
+      <span className="group relative inline-flex">
         <button
           type="button"
-          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-colors transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring group-hover:opacity-100"
+          className="absolute -right-1 -top-1 z-10 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-colors transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring group-hover:opacity-100"
           aria-label={removeLabel}
           title={removeLabel}
           onClick={handleRemove}
@@ -296,13 +293,22 @@ function RemovableIssueReferencePill({
         {issue.identifier ? (
           <Link
             to={`/issues/${issueLabel}`}
-            className="inline-flex min-w-0 items-center gap-1 no-underline hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+            data-mention-kind="issue"
+            className={chipClassName}
+            title={issue.title}
             aria-label={`Task ${issueLabel}: ${issue.title}`}
           >
             {content}
           </Link>
         ) : (
-          <span className="inline-flex min-w-0 items-center gap-1">{content}</span>
+          <span
+            data-mention-kind="issue"
+            className={chipClassName}
+            title={issue.title}
+            aria-label={`Task: ${issue.title}`}
+          >
+            {content}
+          </span>
         )}
       </span>
       <Dialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>

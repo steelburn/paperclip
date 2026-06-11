@@ -597,6 +597,11 @@ describe("IssueProperties", () => {
     expect(blockerLink).not.toBeNull();
     expect(blockerLink?.textContent).toContain("PAP-2");
     expect(blockerLink?.closest("button")).toBeNull();
+    expect(blockerLink?.className).toContain("px-2");
+    expect(blockerLink?.className).toContain("py-0.5");
+    expect(blockerLink?.className).toContain("text-xs");
+    const removeButton = container.querySelector('button[aria-label="Remove PAP-2 as blocker"]');
+    expect(removeButton?.className).toContain("absolute");
     expect(container.textContent).toContain("Add blocker");
     expect(container.querySelector('input[placeholder="Search tasks..."]')).toBeNull();
 
