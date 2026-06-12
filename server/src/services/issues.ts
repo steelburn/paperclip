@@ -677,6 +677,43 @@ export async function listUnfinalizedExecutionWorkspaceIds(
   return unfinalized;
 }
 
+/**
+ * Returns whether a specific run's operations on a specific execution workspace
+ * reached the workspace_finalize barrier.
+ *
+ * Runs with no operations on the workspace are considered finalized because
+ * they never touched the workspace state that accept/review gates protect.
+ */
+export async function runWorkspaceIsFinalized(
+  dbOrTx: Pick<Db, "select">,
+  companyId: string,
+  executionWorkspaceId: string,
+  runId: string,
+): Promise<boolean> {
+  const rows = await dbOrTx
+    .select({
+      phase: workspaceOperations.phase,
+      status: workspaceOperations.status,
+      startedAt: workspaceOperations.startedAt,
+    })
+    .from(workspaceOperations)
+    .where(
+      and(
+        eq(workspaceOperations.companyId, companyId),
+        eq(workspaceOperations.executionWorkspaceId, executionWorkspaceId),
+        eq(workspaceOperations.heartbeatRunId, runId),
+      ),
+    );
+
+  let latest: { phase: string; status: string; startedAt: Date } | null = null;
+  for (const row of rows) {
+    if (!latest || row.startedAt > latest.startedAt) latest = row;
+  }
+
+  if (!latest) return true;
+  return latest.phase === "workspace_finalize" && latest.status === "succeeded";
+}
+
 async function listIssueDependencyReadinessMap(
   dbOrTx: Pick<Db, "select">,
   companyId: string,
