@@ -12,6 +12,7 @@ import {
   User,
   Wrench,
 } from "lucide-react";
+import { AnimatedPaperclipIcon } from "../AnimatedPaperclipIcon";
 
 export type TranscriptMode = "nice" | "raw";
 export type TranscriptDensity = "comfortable" | "compact";
@@ -742,7 +743,7 @@ function TranscriptToolCard({
         ) : block.status === "completed" ? (
           <Check className={iconClass} />
         ) : (
-          <Wrench className={iconClass} />
+          <AnimatedPaperclipIcon className={iconClass} />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -855,10 +856,13 @@ function TranscriptCommandGroup({
                 isRunning
                   ? "border-cyan-500/25 bg-cyan-500/[0.08] text-cyan-600 dark:text-cyan-300"
                   : "border-border/70 bg-background text-foreground/55",
-                isRunning && "animate-pulse",
               )}
             >
-              <TerminalSquare className="h-3.5 w-3.5" />
+              {isRunning ? (
+                <AnimatedPaperclipIcon className="h-3.5 w-3.5" />
+              ) : (
+                <TerminalSquare className="h-3.5 w-3.5" />
+              )}
             </span>
           ))}
         </div>
@@ -980,10 +984,13 @@ function TranscriptToolGroup({
                     : isItemError
                       ? "border-red-500/25 bg-red-500/[0.08] text-red-600 dark:text-red-300"
                       : "border-border/70 bg-background text-foreground/55",
-                  isItemRunning && "animate-pulse",
                 )}
               >
-                <Wrench className="h-3.5 w-3.5" />
+                {isItemRunning ? (
+                  <AnimatedPaperclipIcon className="h-3.5 w-3.5" />
+                ) : (
+                  <Wrench className="h-3.5 w-3.5" />
+                )}
               </span>
             );
           })}
@@ -1020,7 +1027,11 @@ function TranscriptToolGroup({
                       ? "border-cyan-500/25 bg-cyan-500/[0.08] text-cyan-600 dark:text-cyan-300"
                       : "border-border/70 bg-background text-foreground/55",
                 )}>
-                  <Wrench className="h-3 w-3" />
+                  {item.status === "running" ? (
+                    <AnimatedPaperclipIcon className="h-3 w-3" />
+                  ) : (
+                    <Wrench className="h-3 w-3" />
+                  )}
                 </span>
                 <span className={cn("text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground")}>
                   {humanizeLabel(item.name)}
