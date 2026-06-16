@@ -48,6 +48,7 @@ import { usePaperclipIssueRuntime, type PaperclipIssueRuntimeReassignment } from
 import {
   buildIssueChatMessages,
   formatDurationWords,
+  isCoTSegmentActive,
   stabilizeThreadMessages,
   type IssueChatComment,
   type IssueChatLinkedRun,
@@ -851,13 +852,16 @@ function IssueChatChainOfThought({
     (p): p is ToolCallMessagePart => p.type === "tool-call",
   );
 
-  const isActive = isMessageRunning;
-  const [expanded, setExpanded] = useState(isActive);
-
   const rawSegments = Array.isArray(custom.chainOfThoughtSegments)
     ? (custom.chainOfThoughtSegments as SegmentTiming[])
     : [];
   const segmentTiming = myIndex >= 0 ? rawSegments[myIndex] ?? null : null;
+  const isActive = isCoTSegmentActive({
+    isMessageRunning,
+    segmentIndex: myIndex,
+    segmentCount: rawSegments.length,
+  });
+  const [expanded, setExpanded] = useState(isActive);
   const liveElapsed = useLiveElapsed(segmentTiming?.startMs, isActive);
 
   useEffect(() => {
