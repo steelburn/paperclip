@@ -168,6 +168,7 @@ import { IssueAssignedBacklogNotice } from "./IssueAssignedBacklogNotice";
 import { IssueRecoveryActionCard, type RecoveryResolveOutcome } from "./IssueRecoveryActionCard";
 import { SourceTrustBadge } from "./SourceTrustBadge";
 import { AnimatedPaperclipIcon } from "./AnimatedPaperclipIcon";
+import { BoardChatBackgroundWorkCard } from "./BoardChatBackgroundWorkCard";
 
 interface IssueChatMessageContext {
   feedbackDataSharingPreference: FeedbackDataSharingPreference;
@@ -353,6 +354,7 @@ interface IssueChatThreadProps {
   activeRun?: ActiveRunForIssue | null;
   issueId?: string | null;
   blockedBy?: IssueRelationIssueSummary[];
+  backgroundWorkChildren?: IssueRelationIssueSummary[];
   blockerAttention?: IssueBlockerAttention | null;
   successfulRunHandoff?: SuccessfulRunHandoffState | null;
   scheduledRetry?: IssueScheduledRetry | null;
@@ -396,6 +398,7 @@ interface IssueChatThreadProps {
   mentions?: MentionOption[];
   composerDisabledReason?: string | null;
   composerHint?: string | null;
+  suppressIssueStatusNotices?: boolean;
   onWorkModeChange?: (workMode: IssueWorkMode) => Promise<void> | void;
   showComposer?: boolean;
   showJumpToLatest?: boolean;
@@ -3989,6 +3992,7 @@ export function IssueChatThread({
   activeRun = null,
   issueId = null,
   blockedBy = [],
+  backgroundWorkChildren = [],
   blockerAttention = null,
   successfulRunHandoff = null,
   scheduledRetry = null,
@@ -4021,6 +4025,7 @@ export function IssueChatThread({
   mentions = [],
   composerDisabledReason = null,
   composerHint = null,
+  suppressIssueStatusNotices = false,
   showComposer = true,
   showJumpToLatest,
   emptyMessage,
@@ -4675,65 +4680,73 @@ export function IssueChatThread({
             )}
               {showComposer ? (
                 <div data-testid="issue-chat-thread-notices" className="space-y-2">
-                  <IssueAssignedBacklogNotice
-                    issueStatus={issueStatus ?? ""}
-                    assigneeAgent={assignedAgent}
-                    assigneeUserId={assigneeUserId}
-                    onResume={onResumeFromBacklog}
-                    resuming={resumeFromBacklogPending}
+                  <BoardChatBackgroundWorkCard
+                    childrenIssues={backgroundWorkChildren}
+                    agentMap={agentMap}
                   />
-                  {recoveryAction ? (
-                    <IssueRecoveryActionCard
-                      action={recoveryAction}
-                      agentMap={agentMap}
-                      onResolve={onResolveRecoveryAction}
-                      canFalsePositive={canFalsePositiveRecoveryAction}
-                    />
+                  {!suppressIssueStatusNotices ? (
+                    <>
+                      <IssueAssignedBacklogNotice
+                        issueStatus={issueStatus ?? ""}
+                        assigneeAgent={assignedAgent}
+                        assigneeUserId={assigneeUserId}
+                        onResume={onResumeFromBacklog}
+                        resuming={resumeFromBacklogPending}
+                      />
+                      {recoveryAction ? (
+                        <IssueRecoveryActionCard
+                          action={recoveryAction}
+                          agentMap={agentMap}
+                          onResolve={onResolveRecoveryAction}
+                          canFalsePositive={canFalsePositiveRecoveryAction}
+                        />
+                      ) : null}
+                      {legacyRecoverySourceIssue ? (
+                        <SystemNotice
+                          tone="info"
+                          label="Legacy recovery task"
+                          body={
+                            <span>
+                              Legacy recovery task. Newer recovery actions live on the source task
+                              {legacyRecoverySourceIssue.identifier ? (
+                                <>
+                                  {" — "}
+                                  <Link
+                                    to={legacyRecoverySourceIssue.href}
+                                    className="underline-offset-2 hover:underline"
+                                  >
+                                    {legacyRecoverySourceIssue.identifier}
+                                    {legacyRecoverySourceIssue.title ? (
+                                      <span className="text-muted-foreground">
+                                        {" "}
+                                        — {legacyRecoverySourceIssue.title}
+                                      </span>
+                                    ) : null}
+                                  </Link>
+                                </>
+                              ) : (
+                                "."
+                              )}
+                            </span>
+                          }
+                        />
+                      ) : null}
+                      <IssueBlockedNotice
+                        issueId={issueId}
+                        issueStatus={issueStatus}
+                        blockers={unresolvedBlockers}
+                        blockerAttention={blockerAttention}
+                        successfulRunHandoff={recoveryAction ? null : successfulRunHandoff}
+                        scheduledRetry={scheduledRetry}
+                        agentName={
+                          successfulRunHandoff?.assigneeAgentId
+                            ? agentMap?.get(successfulRunHandoff.assigneeAgentId)?.name ?? null
+                            : null
+                        }
+                      />
+                      <IssueAssigneePausedNotice agent={assignedAgent} />
+                    </>
                   ) : null}
-                  {legacyRecoverySourceIssue ? (
-                    <SystemNotice
-                      tone="info"
-                      label="Legacy recovery task"
-                      body={
-                        <span>
-                          Legacy recovery task. Newer recovery actions live on the source task
-                          {legacyRecoverySourceIssue.identifier ? (
-                            <>
-                              {" — "}
-                              <Link
-                                to={legacyRecoverySourceIssue.href}
-                                className="underline-offset-2 hover:underline"
-                              >
-                                {legacyRecoverySourceIssue.identifier}
-                                {legacyRecoverySourceIssue.title ? (
-                                  <span className="text-muted-foreground">
-                                    {" "}
-                                    — {legacyRecoverySourceIssue.title}
-                                  </span>
-                                ) : null}
-                              </Link>
-                            </>
-                          ) : (
-                            "."
-                          )}
-                        </span>
-                      }
-                    />
-                  ) : null}
-                  <IssueBlockedNotice
-                    issueId={issueId}
-                    issueStatus={issueStatus}
-                    blockers={unresolvedBlockers}
-                    blockerAttention={blockerAttention}
-                    successfulRunHandoff={recoveryAction ? null : successfulRunHandoff}
-                    scheduledRetry={scheduledRetry}
-                    agentName={
-                      successfulRunHandoff?.assigneeAgentId
-                        ? agentMap?.get(successfulRunHandoff.assigneeAgentId)?.name ?? null
-                        : null
-                    }
-                  />
-                  <IssueAssigneePausedNotice agent={assignedAgent} />
                 </div>
               ) : null}
               {footer ? <div data-testid="issue-chat-thread-footer">{footer}</div> : null}
