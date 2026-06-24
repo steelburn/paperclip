@@ -557,6 +557,7 @@ export type {
   IssueProductivityReviewTrigger,
   IssueRecoveryAction,
   IssueWatchdog,
+  IssueWatchdogProofOutcomeSummary,
   IssueWatchdogStatus,
   IssueWatchdogSummary,
   SuccessfulRunHandoffState,

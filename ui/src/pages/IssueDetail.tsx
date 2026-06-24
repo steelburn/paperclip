@@ -683,6 +683,8 @@ type IssueDetailChatTabProps = {
   successfulRunHandoff: Issue["successfulRunHandoff"] | null;
   scheduledRetry: Issue["scheduledRetry"] | null;
   recoveryAction: Issue["activeRecoveryAction"];
+  watchdog: Issue["watchdog"] | null;
+  monitorNextCheckAt: Issue["monitorNextCheckAt"] | null;
   onResolveRecoveryAction?: (outcome: import("../components/IssueRecoveryActionCard").RecoveryResolveOutcome) => void;
   canFalsePositiveRecoveryAction?: boolean;
   legacyRecoverySourceIssue?: {
@@ -760,6 +762,8 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
   successfulRunHandoff,
   scheduledRetry,
   recoveryAction,
+  watchdog,
+  monitorNextCheckAt,
   onResolveRecoveryAction,
   canFalsePositiveRecoveryAction,
   legacyRecoverySourceIssue,
@@ -981,6 +985,8 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
         successfulRunHandoff={successfulRunHandoff}
         scheduledRetry={scheduledRetry}
         recoveryAction={recoveryAction ?? null}
+        watchdog={watchdog ?? null}
+        monitorNextCheckAt={monitorNextCheckAt ?? null}
         onResolveRecoveryAction={onResolveRecoveryAction}
         canFalsePositiveRecoveryAction={canFalsePositiveRecoveryAction}
         legacyRecoverySourceIssue={legacyRecoverySourceIssue ?? null}
@@ -4228,6 +4234,8 @@ export function IssueDetail() {
               successfulRunHandoff={issue.successfulRunHandoff ?? null}
               scheduledRetry={issue.scheduledRetry ?? null}
               recoveryAction={issue.activeRecoveryAction ?? null}
+              watchdog={issue.watchdog ?? null}
+              monitorNextCheckAt={issue.monitorNextCheckAt ?? null}
               onResolveRecoveryAction={handleResolveRecoveryAction}
               canFalsePositiveRecoveryAction={canResolveBoardRecoveryAction}
               legacyRecoverySourceIssue={legacyRecoverySourceIssue}

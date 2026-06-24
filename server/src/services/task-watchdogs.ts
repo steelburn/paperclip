@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@paperclipai/db";
 import {
@@ -17,7 +17,12 @@ import {
   issueWatchdogs,
   issueWorkProducts,
 } from "@paperclipai/db";
-import type { IssueWatchdog, IssueWatchdogProofOutcome, IssueWatchdogSummary } from "@paperclipai/shared";
+import type {
+  IssueWatchdog,
+  IssueWatchdogProofOutcome,
+  IssueWatchdogProofOutcomeSummary,
+  IssueWatchdogSummary,
+} from "@paperclipai/shared";
 import { conflict, notFound } from "../errors.js";
 import { parseObject } from "../adapters/utils.js";
 import { logActivity } from "./activity-log.js";
@@ -244,6 +249,29 @@ function toIssueWatchdog(row: IssueWatchdogRow): IssueWatchdog {
     updatedByAgentId: row.updatedByAgentId,
     updatedByUserId: row.updatedByUserId,
     updatedByRunId: row.updatedByRunId,
+  };
+}
+
+type IssueWatchdogProofOutcomeRow = typeof issueWatchdogProofOutcomes.$inferSelect;
+
+// Read-path projection of a persisted proof-outcome row into the typed summary
+// the UI renders. `redactedDetails` is surfaced verbatim — the watchdog run
+// already redacted secrets/URLs before persisting, so this layer never
+// re-fetches or unredacts evidence.
+function summarizeProofOutcome(row: IssueWatchdogProofOutcomeRow): IssueWatchdogProofOutcomeSummary {
+  return {
+    id: row.id,
+    outcome: row.outcome as IssueWatchdogProofOutcome,
+    targetIssueId: row.targetIssueId,
+    method: row.method,
+    observedAt: row.observedAt,
+    resultClassification: row.resultClassification,
+    redactedDetails: row.redactedDetails ?? {},
+    stopFingerprint: row.stopFingerprint,
+    proofObligationFingerprint: row.proofObligationFingerprint,
+    createdByRunId: row.createdByRunId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -1735,7 +1763,24 @@ export function taskWatchdogService(db: Db, deps: TaskWatchdogServiceDeps = {}) 
           eq(issueWatchdogs.status, "active"),
         ))
         .then((rows) => rows[0] ?? null);
-      return row ? toIssueWatchdog(row) : null;
+      if (!row) return null;
+      // Surface the most recent persisted proof outcome so the issue UI can show
+      // the latest watchdog verdict (accepted/deferred/failed/…) and its bounded,
+      // already-redacted evidence without reconstructing the watchdog thread.
+      const latestProofOutcomeRow = await db
+        .select()
+        .from(issueWatchdogProofOutcomes)
+        .where(and(
+          eq(issueWatchdogProofOutcomes.companyId, companyId),
+          eq(issueWatchdogProofOutcomes.watchdogId, row.id),
+        ))
+        .orderBy(desc(issueWatchdogProofOutcomes.observedAt))
+        .limit(1)
+        .then((rows) => rows[0] ?? null);
+      return {
+        ...toIssueWatchdog(row),
+        latestProofOutcome: latestProofOutcomeRow ? summarizeProofOutcome(latestProofOutcomeRow) : null,
+      };
     },
 
     listActiveSummariesForIssues: async (
