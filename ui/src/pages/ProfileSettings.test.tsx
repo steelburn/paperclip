@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfileSettings } from "./ProfileSettings";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const mockAuthApi = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -20,6 +21,14 @@ const mockAssetsApi = vi.hoisted(() => ({
   uploadCompanyLogo: vi.fn(),
 }));
 
+const mockSubscriptionCredentialsApi = vi.hoisted(() => ({
+  list: vi.fn(),
+  get: vi.fn(),
+  upsert: vi.fn(),
+  recordTestResult: vi.fn(),
+  remove: vi.fn(),
+}));
+
 const mockSetBreadcrumbs = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/auth", () => ({
@@ -28,6 +37,10 @@ vi.mock("@/api/auth", () => ({
 
 vi.mock("@/api/assets", () => ({
   assetsApi: mockAssetsApi,
+}));
+
+vi.mock("@/api/subscriptionCredentials", () => ({
+  subscriptionCredentialsApi: mockSubscriptionCredentialsApi,
 }));
 
 vi.mock("../context/BreadcrumbContext", () => ({
@@ -73,6 +86,7 @@ describe("ProfileSettings", () => {
       assetId: "asset-1",
       contentPath: "/api/assets/asset-1/content",
     });
+    mockSubscriptionCredentialsApi.list.mockResolvedValue([]);
     mockAuthApi.updateProfile.mockImplementation(async (input: { name: string; image: string | null }) => ({
       id: "user-1",
       name: input.name,
@@ -96,7 +110,9 @@ describe("ProfileSettings", () => {
     await act(async () => {
       root.render(
         <QueryClientProvider client={queryClient}>
-          <ProfileSettings />
+          <TooltipProvider>
+            <ProfileSettings />
+          </TooltipProvider>
         </QueryClientProvider>,
       );
     });

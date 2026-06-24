@@ -7,6 +7,7 @@ import { assetsApi } from "@/api/assets";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useCompany } from "../context/CompanyContext";
 import { queryKeys } from "../lib/queryKeys";
+import { SubscriptionCredentialsPanel } from "../components/SubscriptionCredentialsPanel";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -268,6 +269,17 @@ export function ProfileSettings() {
             </Button>
           </div>
         </form>
+
+        {selectedCompanyId && selectedCompany ? (
+          <SubscriptionCredentialsPanel
+            companyId={selectedCompanyId}
+            companyName={selectedCompany.name}
+          />
+        ) : (
+          <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            Select a company to manage subscription credentials for that company.
+          </div>
+        )}
       </section>
     </div>
   );

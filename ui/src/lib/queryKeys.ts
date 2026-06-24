@@ -217,6 +217,9 @@ export const queryKeys = {
     usage: (secretId: string) => ["secrets", "usage", secretId] as const,
     accessEvents: (secretId: string) => ["secrets", "access-events", secretId] as const,
   },
+  subscriptionCredentials: {
+    list: (companyId: string) => ["subscription-credentials", companyId] as const,
+  },
   companySearch: {
     search: (companyId: string, q: string, scope: string, limit: number, offset: number) =>
       ["company-search", companyId, q, scope, limit, offset] as const,
