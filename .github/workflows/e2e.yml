@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      PAPERCLIP_HOME: ${{ runner.temp }}/paperclip-home
+      PAPERCLIP_HOME: /tmp/paperclip-home-${{ github.run_id }}-${{ github.run_attempt }}
       PAPERCLIP_INSTANCE_ID: hermes-gateway-smoke
       PAPERCLIP_MIGRATION_AUTO_APPLY: "true"
       PAPERCLIP_MIGRATION_PROMPT: "never"
@@ -31,8 +31,8 @@ jobs:
       HERMES_GATEWAY_API_BASE_URL: http://127.0.0.1:8642
       HERMES_GATEWAY_PROBE_URL: http://127.0.0.1:8642
       PAPERCLIP_API_URL_FOR_HERMES: http://127.0.0.1:3100
-      HERMES_SMOKE_DIAG_DIR: ${{ runner.temp }}/hermes-gateway-diag
-      HERMES_SMOKE_STATE_DIR: ${{ runner.temp }}/hermes-gateway-state
+      HERMES_SMOKE_DIAG_DIR: /tmp/hermes-gateway-diag-${{ github.run_id }}-${{ github.run_attempt }}
+      HERMES_SMOKE_STATE_DIR: /tmp/hermes-gateway-state-${{ github.run_id }}-${{ github.run_attempt }}
       RUN_TIMEOUT_SEC: "420"
       CASE_TIMEOUT_SEC: "420"
 
