@@ -51,6 +51,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: Build runtime package dependencies
+        run: pnpm --filter @paperclipai/plugin-sdk build
+
       - name: Record Docker runner details
         run: |
           set -euo pipefail
