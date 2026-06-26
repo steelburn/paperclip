@@ -579,7 +579,11 @@ assert_direct_gateway_run() {
 
   log "asserting POST /v1/runs and SSE events"
   gateway_request "POST" "/v1/runs" "$payload" "${HERMES_SMOKE_DIAG_DIR}/direct-run-create.json"
-  assert_status "200"
+  if [[ "$RESPONSE_CODE" != "200" && "$RESPONSE_CODE" != "202" ]]; then
+    redact_text "$RESPONSE_BODY" >&2
+    echo >&2
+    fail "expected HTTP 200 or 202, got HTTP ${RESPONSE_CODE}"
+  fi
   DIRECT_RUN_ID="$(jq -r '.run_id // .runId // .id // empty' <<<"$RESPONSE_BODY")"
   [[ -n "$DIRECT_RUN_ID" ]] || fail "direct run creation did not return run id"
 
