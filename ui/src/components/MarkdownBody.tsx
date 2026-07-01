@@ -15,6 +15,36 @@ import { parseWorkspaceFileHref, remarkWorkspaceFileRefs, WORKSPACE_FILE_HREF_PR
 import { remarkSoftBreaks } from "../lib/remark-soft-breaks";
 import { StatusIcon } from "./StatusIcon";
 import { WorkspaceFileLink } from "./WorkspaceFileLink";
+import { ExternalObjectStatusIcon } from "./ExternalObjectStatusIcon";
+import {
+  externalObjectCategoryLabel,
+  externalObjectLivenessLabel,
+  externalObjectProviderLabel,
+} from "../lib/external-objects";
+import { normalizeExternalObjectHref } from "../lib/external-object-href";
+import type {
+  ExternalObjectLivenessState,
+  ExternalObjectStatusCategory,
+} from "@paperclipai/shared";
+
+/**
+ * Host-resolved external-object metadata for inline markdown decoration.
+ * The renderer only consumes the host normalized fields here — plugin React
+ * is never mounted inline (Phase 1B security review).
+ */
+export interface MarkdownExternalReference {
+  providerKey: string | null;
+  objectType: string | null;
+  displayKey?: string | null;
+  iconKey?: string | null;
+  statusCategory: ExternalObjectStatusCategory;
+  liveness: ExternalObjectLivenessState;
+  statusLabel?: string | null;
+  statusIconKey?: string | null;
+  displayTitle?: string | null;
+}
+
+export type MarkdownExternalReferenceMap = Record<string, MarkdownExternalReference>;
 
 interface MarkdownBodyProps {
   children: string;
@@ -28,6 +58,12 @@ interface MarkdownBodyProps {
   wikiLinkRoot?: string;
   /** Optional href resolver for wikilinks. Return null to leave a token as plain text. */
   resolveWikiLinkHref?: (target: string, label: string) => string | null | undefined;
+  /**
+   * Optional map of `normalizeExternalObjectHref(href)` → host-resolved metadata.
+   * Hrefs in the markdown that resolve to one of these keys get the inline
+   * status icon prefix used by §2 of the UX spec.
+   */
+  externalReferences?: MarkdownExternalReferenceMap;
   /** Optional resolver for relative image paths (e.g. within export packages) */
   resolveImageSrc?: (src: string) => string | null;
   /** Called when a user clicks an inline image */
@@ -60,15 +96,62 @@ function MarkdownIssueLink({
     <Link
       to={`/issues/${identifier}`}
       data-mention-kind="issue"
-      className="paperclip-markdown-issue-ref"
+      // Boxless inline mention: the unified status glyph + a regular-weight
+      // underlined link, optically centered with the body text.
+      className={cn("paperclip-markdown-issue-ref", "font-normal underline")}
       title={title}
       aria-label={issueLabel}
     >
       {status ? (
-        <StatusIcon status={status} className="mr-1 h-3 w-3 align-[-0.125em]" />
+        <StatusIcon status={status} size="lg" className="relative -top-px mr-1 inline-block h-5 w-5 align-middle" />
       ) : null}
       {children}
     </Link>
+  );
+}
+
+function MarkdownExternalLink({
+  href,
+  reference,
+  children,
+}: {
+  href: string;
+  reference: MarkdownExternalReference;
+  children: ReactNode;
+}) {
+  const provider = externalObjectProviderLabel(reference.providerKey);
+  const displayKey = reference.displayKey?.trim() || provider;
+  const statusLabel = reference.statusLabel ?? externalObjectCategoryLabel(reference.statusCategory);
+  const livenessLabel = externalObjectLivenessLabel(reference.liveness);
+  const livenessSuffix = reference.liveness === "fresh" || reference.liveness === "unknown"
+    ? ""
+    : ` (${livenessLabel})`;
+  const titleParts = [
+    reference.displayTitle ?? `${displayKey} ${statusLabel}`,
+    `${displayKey} — ${statusLabel}${livenessSuffix}`,
+  ];
+  const title = titleParts.filter(Boolean).join(" · ");
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-external-link="resolved"
+      data-external-status={reference.statusCategory}
+      data-external-liveness={reference.liveness}
+      title={title}
+      aria-label={`${displayKey} ${statusLabel}${livenessSuffix}: ${reference.displayTitle ?? href}`}
+      className="paperclip-markdown-external-ref"
+    >
+      <ExternalObjectStatusIcon
+        category={reference.statusCategory}
+        liveness={reference.liveness}
+        statusIconKey={reference.statusIconKey}
+        label={`${displayKey}: ${statusLabel}`}
+        inline
+      />
+      {children}
+    </a>
   );
 }
 
@@ -572,6 +655,7 @@ function MarkdownBodyImpl({
   enableWikiLinks = false,
   wikiLinkRoot,
   resolveWikiLinkHref,
+  externalReferences,
   resolveImageSrc,
   onImageClick,
   linkWorkspaceFileRefs = false,
@@ -588,6 +672,15 @@ function MarkdownBodyImpl({
     () => (companies?.length ? companies.map((c) => c.issuePrefix) : undefined),
     [companies],
   );
+  const externalReferenceLookup = useMemo<MarkdownExternalReferenceMap | null>(() => {
+    if (!externalReferences) return null;
+    const lookup: MarkdownExternalReferenceMap = {};
+    for (const [key, value] of Object.entries(externalReferences)) {
+      const normalized = normalizeExternalObjectHref(key) ?? key;
+      lookup[normalized] = value;
+    }
+    return lookup;
+  }, [externalReferences]);
   // react-markdown treats the values of `components` as component *types* and
   // the `remarkPlugins` array by identity. Rebuilding either on every render
   // forces react-markdown to unmount/remount the rendered tree, which discards
@@ -720,6 +813,17 @@ function MarkdownBodyImpl({
           </a>
         );
       }
+      const externalReference = href && externalReferenceLookup
+        ? externalReferenceLookup[normalizeExternalObjectHref(href) ?? ""] ?? null
+        : null;
+      if (externalReference && href) {
+        return (
+          <MarkdownExternalLink href={href} reference={externalReference}>
+            {linkChildren}
+          </MarkdownExternalLink>
+        );
+      }
+
       const isGitHubLink = isGitHubUrl(href);
       const isExternal = isExternalHttpUrl(href);
       const leadingIcon = isGitHubLink ? (
@@ -757,7 +861,7 @@ function MarkdownBodyImpl({
       };
     }
     return map;
-  }, [theme, linkIssueReferences, resolveImageSrc, onImageClick]);
+  }, [theme, linkIssueReferences, externalReferenceLookup, resolveImageSrc, onImageClick]);
 
   return (
     <div

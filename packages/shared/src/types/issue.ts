@@ -501,6 +501,34 @@ export interface IssueExecutionDecision {
   updatedAt: Date;
 }
 
+export type IssueWatchdogStatus = "active" | "disabled";
+
+export interface IssueWatchdogSummary {
+  id: string;
+  companyId: string;
+  issueId: string;
+  watchdogAgentId: string;
+  instructions: string | null;
+  status: IssueWatchdogStatus;
+  watchdogIssueId: string | null;
+  lastObservedFingerprint: string | null;
+  lastReviewedFingerprint: string | null;
+  lastTriggeredAt: Date | null;
+  lastCompletedAt: Date | null;
+  triggerCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface IssueWatchdog extends IssueWatchdogSummary {
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
+  createdByRunId: string | null;
+  updatedByAgentId: string | null;
+  updatedByUserId: string | null;
+  updatedByRunId: string | null;
+}
+
 export interface Issue {
   id: string;
   companyId: string;
@@ -555,6 +583,7 @@ export interface Issue {
   productivityReview?: IssueProductivityReview | null;
   activeRecoveryAction?: IssueRecoveryAction | null;
   successfulRunHandoff?: SuccessfulRunHandoffState | null;
+  watchdog?: IssueWatchdogSummary | null;
   scheduledRetry?: IssueScheduledRetry | null;
   relatedWork?: IssueRelatedWorkSummary;
   referencedIssueIdentifiers?: string[];
@@ -731,6 +760,7 @@ export interface AskUserQuestionsPayload {
   version: 1;
   title?: string | null;
   submitLabel?: string | null;
+  supersedeOnUserComment?: boolean;
   questions: AskUserQuestionsQuestion[];
 }
 
@@ -745,6 +775,8 @@ export interface AskUserQuestionsResult {
   answers: AskUserQuestionsAnswer[];
   cancelled?: true;
   cancellationReason?: string | null;
+  expirationReason?: "superseded_by_comment";
+  commentId?: string | null;
   summaryMarkdown?: string | null;
 }
 
