@@ -313,8 +313,10 @@ function customImageTerminalStatusCopy(state: CustomImageTerminalConnectionState
 }
 
 function EnvironmentCustomImageBrowserTerminal({
+  autoConnect = false,
   sessionId,
 }: {
+  autoConnect?: boolean;
   sessionId: string;
 }) {
   const [connectionState, setConnectionState] = useState<CustomImageTerminalConnectionState>("idle");
@@ -322,6 +324,7 @@ function EnvironmentCustomImageBrowserTerminal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const terminalRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const autoConnectAttemptedSessionRef = useRef<string | null>(null);
 
   const closeSocket = useCallback((reason = "operator_closed") => {
     const socket = socketRef.current;
@@ -335,6 +338,7 @@ function EnvironmentCustomImageBrowserTerminal({
 
   useEffect(() => {
     closeSocket("session_changed");
+    autoConnectAttemptedSessionRef.current = null;
     setConnectionState("idle");
     setOutput("");
     setErrorMessage(null);
@@ -411,6 +415,16 @@ function EnvironmentCustomImageBrowserTerminal({
       setErrorMessage(error instanceof Error ? error.message : "Terminal session could not be opened.");
     }
   }, [closeSocket, sessionId]);
+
+  useEffect(() => {
+    if (!autoConnect || connectionState !== "idle") return;
+    if (autoConnectAttemptedSessionRef.current === sessionId) return;
+    const timeoutId = window.setTimeout(() => {
+      autoConnectAttemptedSessionRef.current = sessionId;
+      void connectTerminal();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [autoConnect, connectTerminal, connectionState, sessionId]);
 
   const sendTerminalInput = useCallback((data: string) => {
     const socket = socketRef.current;
@@ -581,7 +595,6 @@ function EnvironmentImageTemplatePanel({
         latestSession: result.session,
       }));
       setSessionResult(result);
-      invalidateOverview();
       pushToast({
         title: "Setup session started",
         body: "Connect details are available while the session is active.",
@@ -782,14 +795,17 @@ function EnvironmentImageTemplatePanel({
           </div>
         </div>
         {session.status === "waiting_for_user" && connectionPayload?.type === "ssh" ? (
-          <EnvironmentCustomImageBrowserTerminal sessionId={session.id} />
+          <EnvironmentCustomImageBrowserTerminal autoConnect sessionId={session.id} />
         ) : null}
         {session.status === "waiting_for_user" && connectionCommand ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-muted/30 px-3 py-2">
-            <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-[11px] leading-5">
+          <details className="mt-2 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none font-medium text-foreground">
+              SSH command fallback
+            </summary>
+            <code className="mt-2 block overflow-x-auto whitespace-nowrap text-[11px] leading-5">
               {connectionCommand}
             </code>
-          </div>
+          </details>
         ) : null}
         {session.status === "waiting_for_user" && connectionFallbackMessage ? (
           <div className="mt-2 text-xs text-muted-foreground">

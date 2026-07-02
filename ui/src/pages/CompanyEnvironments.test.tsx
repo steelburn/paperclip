@@ -629,7 +629,7 @@ describe("CompanyEnvironments — test provider button", () => {
     expect(getOpenDialog()?.textContent).not.toContain(command);
   });
 
-  it("opens an embedded browser terminal while preserving the SSH command fallback", async () => {
+  it("opens an embedded browser terminal automatically while preserving the SSH command fallback", async () => {
     root = createRoot(container);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const command = "ssh sandbox@setup.example.invalid -p 2222";
@@ -661,11 +661,8 @@ describe("CompanyEnvironments — test provider button", () => {
     await act(async () => click(editButtons(container)[0]));
     await waitForAssertion(() => {
       expect(getOpenDialog()?.textContent).toContain(command);
-      expect(findButton(getOpenDialog()!, "Open terminal")).toBeTruthy();
-    });
-
-    await act(async () => click(findButton(getOpenDialog()!, "Open terminal")));
-    await waitForAssertion(() => {
+      expect(getOpenDialog()?.textContent).toContain("Browser terminal");
+      expect(getOpenDialog()?.textContent).toContain("SSH command fallback");
       expect(mockEnvironmentsApi.createCustomImageTerminalSessionToken).toHaveBeenCalledExactlyOnceWith("session-1", {});
       expect(FakeWebSocket.instances).toHaveLength(1);
     });
@@ -885,5 +882,11 @@ describe("CompanyEnvironments — test provider button", () => {
       "company-1",
       { templateId: "template-active" },
     );
+    await waitForAssertion(() => {
+      expect(getOpenDialog()?.textContent).toContain("Browser terminal");
+      expect(getOpenDialog()?.textContent).toContain("SSH command fallback");
+      expect(mockEnvironmentsApi.createCustomImageTerminalSessionToken).toHaveBeenCalledExactlyOnceWith("session-1", {});
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
   });
 });
