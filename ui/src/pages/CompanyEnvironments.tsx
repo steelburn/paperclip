@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Play, RefreshCw, RotateCcw, Terminal, Trash2, X } from "lucide-react";
 import {
@@ -224,6 +232,9 @@ function setupConnectionFallbackMessage(input: {
 const CUSTOM_IMAGE_TERMINAL_COLS = 100;
 const CUSTOM_IMAGE_TERMINAL_ROWS = 28;
 const CUSTOM_IMAGE_TERMINAL_SCROLLBACK_LIMIT = 120_000;
+const TERMINAL_CONTROL_SEQUENCE_PATTERN =
+  // eslint-disable-next-line no-control-regex
+  /(?:\x1B\][\s\S]*?(?:\x07|\x1B\\))|(?:\x1B\[[0-?]*[ -/]*[@-~])|(?:\x1B[PX^_][\s\S]*?\x1B\\)|(?:\x1B[@-Z\\-_])/g;
 
 type CustomImageTerminalConnectionState =
   | "idle"
@@ -244,6 +255,48 @@ function appendTerminalOutput(current: string, chunk: string) {
   return next.length > CUSTOM_IMAGE_TERMINAL_SCROLLBACK_LIMIT
     ? next.slice(-CUSTOM_IMAGE_TERMINAL_SCROLLBACK_LIMIT)
     : next;
+}
+
+function renderTerminalOutput(raw: string) {
+  const cleaned = raw.replace(TERMINAL_CONTROL_SEQUENCE_PATTERN, "").replace(/\r\n/g, "\n");
+  const buffer: string[] = [];
+  let cursor = 0;
+  let lineStart = 0;
+
+  for (const char of cleaned) {
+    if (char === "\r") {
+      cursor = lineStart;
+      continue;
+    }
+
+    if (char === "\n") {
+      cursor = buffer.length;
+      buffer.push(char);
+      cursor += 1;
+      lineStart = cursor;
+      continue;
+    }
+
+    if (char === "\b" || char === "\x7f") {
+      if (cursor > lineStart) {
+        cursor -= 1;
+      }
+      continue;
+    }
+
+    if (char.charCodeAt(0) < 32 && char !== "\t") {
+      continue;
+    }
+
+    if (cursor >= buffer.length) {
+      buffer.push(char);
+    } else {
+      buffer[cursor] = char;
+    }
+    cursor += 1;
+  }
+
+  return buffer.join("");
 }
 
 function parseTerminalFrame(raw: string): Record<string, unknown> | null {
@@ -322,7 +375,7 @@ function EnvironmentCustomImageBrowserTerminal({
   const [connectionState, setConnectionState] = useState<CustomImageTerminalConnectionState>("idle");
   const [output, setOutput] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const terminalRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<HTMLTextAreaElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const autoConnectAttemptedSessionRef = useRef<string | null>(null);
 
@@ -432,12 +485,20 @@ function EnvironmentCustomImageBrowserTerminal({
     socket.send(JSON.stringify({ type: "input", data }));
   }, []);
 
-  const handleTerminalKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+  const handleTerminalKeyDown = useCallback((event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     const input = terminalInputForKey(event);
     if (!input) return;
     event.preventDefault();
     sendTerminalInput(input);
   }, [sendTerminalInput]);
+
+  const handleTerminalPaste = useCallback((event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    if (connectionState !== "connected") return;
+    const text = event.clipboardData.getData("text");
+    if (!text) return;
+    event.preventDefault();
+    sendTerminalInput(text.replace(/\r?\n/g, "\r"));
+  }, [connectionState, sendTerminalInput]);
 
   const disconnectTerminal = useCallback(() => {
     closeSocket("operator_closed");
@@ -445,7 +506,16 @@ function EnvironmentCustomImageBrowserTerminal({
   }, [closeSocket]);
 
   const terminalInteractive = connectionState === "connected";
-  const terminalDisplay = output || customImageTerminalStatusCopy(connectionState);
+  const terminalDisplay = useMemo(
+    () => output ? renderTerminalOutput(output) : customImageTerminalStatusCopy(connectionState),
+    [connectionState, output],
+  );
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.scrollTop = terminal.scrollHeight;
+  }, [terminalDisplay]);
 
   return (
     <div className="mt-3 rounded-md border border-border/70 bg-background" data-testid={`custom-image-terminal-${sessionId}`}>
@@ -474,16 +544,23 @@ function EnvironmentCustomImageBrowserTerminal({
         </div>
       </div>
       <div
-        ref={terminalRef}
-        data-testid={`custom-image-terminal-input-${sessionId}`}
-        role="textbox"
-        aria-label="Custom image browser terminal"
-        aria-multiline="true"
-        tabIndex={terminalInteractive ? 0 : -1}
-        onKeyDown={handleTerminalKeyDown}
-        className="min-h-[18rem] max-h-[26rem] overflow-auto bg-neutral-950 px-3 py-2 font-mono text-[12px] leading-5 text-neutral-100 outline-none focus:ring-2 focus:ring-ring"
+        className="bg-neutral-950"
       >
-        <pre className="whitespace-pre-wrap break-words">{terminalDisplay}</pre>
+        <textarea
+          ref={terminalRef}
+          data-testid={`custom-image-terminal-input-${sessionId}`}
+          aria-label="Custom image browser terminal"
+          aria-multiline="true"
+          aria-readonly="true"
+          readOnly
+          spellCheck={false}
+          tabIndex={0}
+          value={terminalDisplay}
+          onKeyDown={handleTerminalKeyDown}
+          onPaste={handleTerminalPaste}
+          onClick={() => terminalRef.current?.focus()}
+          className="block min-h-[18rem] max-h-[26rem] w-full resize-none overflow-auto border-0 bg-neutral-950 px-3 py-2 font-mono text-[12px] leading-5 text-neutral-100 outline-none focus:ring-2 focus:ring-ring"
+        />
       </div>
       {errorMessage ? (
         <div className="border-t border-border/60 px-3 py-2 text-xs text-destructive">

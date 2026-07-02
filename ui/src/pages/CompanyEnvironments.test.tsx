@@ -676,14 +676,18 @@ describe("CompanyEnvironments — test provider button", () => {
     await act(async () => {
       FakeWebSocket.instances[0].open();
       FakeWebSocket.instances[0].emitMessage(JSON.stringify({ type: "ready" }));
-      FakeWebSocket.instances[0].emitMessage(JSON.stringify({ type: "output", data: "setup shell\\n$ " }));
+      FakeWebSocket.instances[0].emitMessage(JSON.stringify({ type: "output", data: "\u001b[?2004hsetup shell\r\n$ " }));
     });
+    const terminal = getOpenDialog()?.querySelector<HTMLTextAreaElement>(
+      "[data-testid='custom-image-terminal-input-session-1']",
+    );
     await waitForAssertion(() => {
-      expect(getOpenDialog()?.textContent).toContain("setup shell");
+      expect(terminal?.value).toContain("setup shell");
+      expect(terminal?.value).not.toContain("[?2004h");
+      expect(document.activeElement).toBe(terminal);
       expect(getOpenDialog()?.textContent).toContain(command);
     });
 
-    const terminal = getOpenDialog()?.querySelector("[data-testid='custom-image-terminal-input-session-1']");
     await act(async () => {
       terminal?.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true }));
       terminal?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
