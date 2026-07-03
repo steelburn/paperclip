@@ -37,6 +37,7 @@ export interface EnvironmentCustomImageTerminalSessionRecord {
   provider: string;
   connectionType: "ssh";
   ssh: ParsedCustomImageSetupSshCommand;
+  hostKeySha256: string | null;
   createdAt: Date;
   connectExpiresAt: Date;
   sessionExpiresAt: Date;
@@ -177,6 +178,12 @@ function toValidFutureDate(value: Date | string | null | undefined, now: Date): 
   return date.getTime() > now.getTime() ? date : null;
 }
 
+function normalizeHostKeySha256(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized && normalized.length <= 256 ? normalized : null;
+}
+
 export class EnvironmentCustomImageTerminalSessionStore {
   private readonly sessionsById = new Map<string, StoredEnvironmentCustomImageTerminalSession>();
 
@@ -213,6 +220,7 @@ export class EnvironmentCustomImageTerminalSessionStore {
       provider: input.provider,
       connectionType: "ssh",
       ssh: input.ssh,
+      hostKeySha256: null,
       createdAt: now,
       connectExpiresAt,
       sessionExpiresAt: setupExpiresAt,
@@ -245,6 +253,22 @@ export class EnvironmentCustomImageTerminalSessionStore {
       return null;
     }
     return stored.session;
+  }
+
+  verifyOrPinHostKey(input: { id: string; hostKeySha256: string }, now = new Date()): boolean {
+    const hostKeySha256 = normalizeHostKeySha256(input.hostKeySha256);
+    if (!input.id || !hostKeySha256) return false;
+    const stored = this.sessionsById.get(input.id) ?? null;
+    if (!stored) return false;
+    if (stored.session.sessionExpiresAt.getTime() <= now.getTime()) {
+      this.sessionsById.delete(input.id);
+      return false;
+    }
+    if (!stored.session.hostKeySha256) {
+      stored.session.hostKeySha256 = hostKeySha256;
+      return true;
+    }
+    return stored.session.hostKeySha256 === hostKeySha256;
   }
 
   delete(id: string): boolean {

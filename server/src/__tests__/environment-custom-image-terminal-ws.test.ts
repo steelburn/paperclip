@@ -142,12 +142,6 @@ function waitForOpen(ws: InstanceType<typeof WebSocket>) {
   });
 }
 
-function waitForError(ws: InstanceType<typeof WebSocket>) {
-  return new Promise<Error>((resolve) => {
-    ws.on("error", resolve);
-  });
-}
-
 function waitForClose(ws: InstanceType<typeof WebSocket>) {
   return new Promise<void>((resolve) => {
     ws.on("close", resolve);
@@ -167,10 +161,14 @@ function waitForJsonMessage<T extends Record<string, unknown>>(
   });
 }
 
-function terminalUrl(port: number, input: { setupSessionId?: string; terminalSessionId: string; token: string }) {
+function sendTerminalAuth(ws: InstanceType<typeof WebSocket>, token: string) {
+  ws.send(JSON.stringify({ type: "auth", token }));
+}
+
+function terminalUrl(port: number, input: { setupSessionId?: string; terminalSessionId: string }) {
   const setupSessionId = input.setupSessionId ?? "session-1";
   return `ws://127.0.0.1:${port}/api/environment-custom-image-setup-sessions/${setupSessionId}/terminal/ws`
-    + `?terminalSessionId=${encodeURIComponent(input.terminalSessionId)}&token=${encodeURIComponent(input.token)}`
+    + `?terminalSessionId=${encodeURIComponent(input.terminalSessionId)}`
     + "&cols=100&rows=30";
 }
 
@@ -230,11 +228,17 @@ describe("custom image terminal websocket bridge", () => {
     const { port } = await startHarness();
     const invalid = new WebSocket(terminalUrl(port, {
       terminalSessionId: "missing",
-      token: "bad-token",
     }));
 
-    const invalidError = await waitForError(invalid);
-    expect(invalidError.message).toContain("422");
+    const invalidError = waitForJsonMessage(invalid, (frame) => frame.type === "error");
+    const invalidClose = waitForClose(invalid);
+    await waitForOpen(invalid);
+    sendTerminalAuth(invalid, "bad-token");
+    await expect(invalidError).resolves.toMatchObject({
+      type: "error",
+      message: "Invalid terminal session token.",
+    });
+    await invalidClose;
     expect(customImages.refreshSetupSession).not.toHaveBeenCalled();
 
     const expired = sessionStore.create({
@@ -249,11 +253,17 @@ describe("custom image terminal websocket bridge", () => {
     });
     const expiredWs = new WebSocket(terminalUrl(port, {
       terminalSessionId: expired.session.id,
-      token: expired.token,
     }));
 
-    const expiredError = await waitForError(expiredWs);
-    expect(expiredError.message).toContain("422");
+    const expiredError = waitForJsonMessage(expiredWs, (frame) => frame.type === "error");
+    const expiredClose = waitForClose(expiredWs);
+    await waitForOpen(expiredWs);
+    sendTerminalAuth(expiredWs, expired.token);
+    await expect(expiredError).resolves.toMatchObject({
+      type: "error",
+      message: "Invalid terminal session token.",
+    });
+    await expiredClose;
     expect(customImages.refreshSetupSession).not.toHaveBeenCalled();
   });
 
@@ -277,10 +287,16 @@ describe("custom image terminal websocket bridge", () => {
 
     const unsupportedWs = new WebSocket(terminalUrl(port, {
       terminalSessionId: unsupportedPayload.session.id,
-      token: unsupportedPayload.token,
     }));
-    const unsupportedError = await waitForError(unsupportedWs);
-    expect(unsupportedError.message).toContain("422");
+    const unsupportedError = waitForJsonMessage(unsupportedWs, (frame) => frame.type === "error");
+    const unsupportedClose = waitForClose(unsupportedWs);
+    await waitForOpen(unsupportedWs);
+    sendTerminalAuth(unsupportedWs, unsupportedPayload.token);
+    await expect(unsupportedError).resolves.toMatchObject({
+      type: "error",
+      message: "Setup session terminal connections require an SSH connection payload.",
+    });
+    await unsupportedClose;
     expect(sessionStore.get({
       id: unsupportedPayload.session.id,
       token: unsupportedPayload.token,
@@ -304,10 +320,16 @@ describe("custom image terminal websocket bridge", () => {
 
     const unsupportedCommandWs = new WebSocket(terminalUrl(port, {
       terminalSessionId: unsupportedCommand.session.id,
-      token: unsupportedCommand.token,
     }));
-    const unsupportedCommandError = await waitForError(unsupportedCommandWs);
-    expect(unsupportedCommandError.message).toContain("422");
+    const unsupportedCommandError = waitForJsonMessage(unsupportedCommandWs, (frame) => frame.type === "error");
+    const unsupportedCommandClose = waitForClose(unsupportedCommandWs);
+    await waitForOpen(unsupportedCommandWs);
+    sendTerminalAuth(unsupportedCommandWs, unsupportedCommand.token);
+    await expect(unsupportedCommandError).resolves.toMatchObject({
+      type: "error",
+      message: "Setup session SSH payload uses an unsupported command shape.",
+    });
+    await unsupportedCommandClose;
     expect(sessionStore.get({
       id: unsupportedCommand.session.id,
       token: unsupportedCommand.token,
@@ -327,11 +349,11 @@ describe("custom image terminal websocket bridge", () => {
     });
     const ws = new WebSocket(terminalUrl(port, {
       terminalSessionId: minted.session.id,
-      token: minted.token,
     }));
     const readyPromise = waitForJsonMessage(ws, (frame) => frame.type === "ready");
 
     await waitForOpen(ws);
+    sendTerminalAuth(ws, minted.token);
     const ready = await readyPromise;
     expect(ready).toMatchObject({
       type: "ready",
@@ -347,6 +369,7 @@ describe("custom image terminal websocket bridge", () => {
       term: "xterm-256color",
       cols: 100,
       rows: 30,
+      verifyHostKeySha256: expect.any(Function),
     });
 
     ws.send(JSON.stringify({ type: "input", data: "echo ok\r" }));
@@ -400,7 +423,6 @@ describe("custom image terminal websocket bridge", () => {
 
     const ws = new WebSocket(terminalUrl(port, {
       terminalSessionId: minted.session.id,
-      token: minted.token,
     }));
     let closed = false;
     ws.on("close", () => {
@@ -410,6 +432,7 @@ describe("custom image terminal websocket bridge", () => {
     const closePromise = waitForClose(ws);
 
     await waitForOpen(ws);
+    sendTerminalAuth(ws, minted.token);
     await readyPromise;
     await waitForDuration(Math.max(0, minted.session.connectExpiresAt.getTime() - Date.now()) + 400);
     expect(closed).toBe(false);
@@ -434,11 +457,14 @@ describe("custom image terminal websocket bridge", () => {
     });
     const ws = new WebSocket(terminalUrl(port, {
       terminalSessionId: minted.session.id,
-      token: minted.token,
     }));
     const readyPromise = waitForJsonMessage(ws, (frame) => frame.type === "ready");
 
     await waitForOpen(ws);
+    sendTerminalAuth(ws, minted.token);
+    await waitForAssertion(() => {
+      expect(connector.connect).toHaveBeenCalled();
+    });
     const unsupportedFramePromise = waitForJsonMessage(ws, (frame) => frame.type === "error");
     ws.send(JSON.stringify({ type: "resize", cols: 110, rows: 31 }));
     ws.send(JSON.stringify({ type: "resize", cols: 132, rows: 43 }));
@@ -467,12 +493,12 @@ describe("custom image terminal websocket bridge", () => {
     });
     const ws = new WebSocket(terminalUrl(port, {
       terminalSessionId: minted.session.id,
-      token: minted.token,
     }));
     const errorPromise = waitForJsonMessage(ws, (frame) => frame.type === "error");
     const closePromise = waitForClose(ws);
 
     await waitForOpen(ws);
+    sendTerminalAuth(ws, minted.token);
     await expect(errorPromise).resolves.toMatchObject({
       type: "error",
       message: "SSH terminal connection failed.",
@@ -493,11 +519,11 @@ describe("custom image terminal websocket bridge", () => {
     });
     const ws = new WebSocket(terminalUrl(port, {
       terminalSessionId: minted.session.id,
-      token: minted.token,
     }));
     const readyPromise = waitForJsonMessage(ws, (frame) => frame.type === "ready");
 
     await waitForOpen(ws);
+    sendTerminalAuth(ws, minted.token);
     await readyPromise;
     const errorPromise = waitForJsonMessage(ws, (frame) => frame.type === "error");
     const closePromise = waitForClose(ws);
@@ -523,11 +549,11 @@ describe("custom image terminal websocket bridge", () => {
     });
     const ws = new WebSocket(terminalUrl(port, {
       terminalSessionId: minted.session.id,
-      token: minted.token,
     }));
     const readyPromise = waitForJsonMessage(ws, (frame) => frame.type === "ready");
 
     await waitForOpen(ws);
+    sendTerminalAuth(ws, minted.token);
     await readyPromise;
     const closePromise = waitForClose(ws);
     server.emit("close");

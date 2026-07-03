@@ -76,10 +76,18 @@ export interface EnvironmentCustomImageSshConnector {
     term: string;
     cols: number;
     rows: number;
+    verifyHostKeySha256: (hostKeySha256: string) => boolean;
   }): Promise<EnvironmentCustomImageSshShell>;
 }
 
 interface TerminalUpgradeContext {
+  setupSessionId: string;
+  terminalSessionId: string;
+  initialCols: number;
+  initialRows: number;
+}
+
+interface AuthenticatedTerminalContext {
   setupSessionId: string;
   terminalSession: EnvironmentCustomImageTerminalSessionRecord;
   ssh: ParsedCustomImageSetupSshCommand;
@@ -101,6 +109,7 @@ const CUSTOM_IMAGE_TERMINAL_UTF8_ENV = {
   LANG: "C.UTF-8",
   LC_CTYPE: "C.UTF-8",
 };
+const TERMINAL_AUTH_TIMEOUT_MS = 10_000;
 
 function isWritableUpgradeSocket(socket: Duplex) {
   const maybeWritableState = socket as Duplex & { writable?: boolean; writableEnded?: boolean; writableDestroyed?: boolean };
@@ -171,21 +180,35 @@ function readSetupSessionCompanyId(session: {
   return companyId && companyId !== "instance" ? companyId : null;
 }
 
-function statusLineForError(err: unknown) {
-  const status = typeof err === "object" && err !== null && "status" in err
-    ? Number((err as { status?: unknown }).status)
-    : 500;
-  if (status === 400) return "400 Bad Request";
-  if (status === 401) return "401 Unauthorized";
-  if (status === 403) return "403 Forbidden";
-  if (status === 404) return "404 Not Found";
-  if (status === 409) return "409 Conflict";
-  if (status === 422) return "422 Unprocessable Entity";
-  return "500 Internal Server Error";
-}
-
 function safeErrorName(err: unknown) {
   return err instanceof Error ? err.name : typeof err;
+}
+
+function errorStatus(err: unknown) {
+  return typeof err === "object" && err !== null && "status" in err
+    ? Number((err as { status?: unknown }).status)
+    : 500;
+}
+
+function clientSafeErrorMessage(err: unknown, fallback: string) {
+  const status = errorStatus(err);
+  if ([400, 401, 403, 404, 409, 422].includes(status) && err instanceof Error && err.message) {
+    return err.message;
+  }
+  return fallback;
+}
+
+function safeUpgradePath(rawUrl: string | undefined): string | undefined {
+  if (!rawUrl) return undefined;
+  try {
+    const url = new URL(rawUrl, "http://localhost");
+    if (url.searchParams.has("token")) {
+      url.searchParams.set("token", "[redacted]");
+    }
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return rawUrl.split("?")[0] || undefined;
+  }
 }
 
 function terminalPayloadValidationError(
@@ -210,6 +233,50 @@ function sendJson(socket: TerminalWsSocket, frame: Record<string, unknown>) {
 function closeClient(socket: TerminalWsSocket, code: number, reason: string) {
   if (socket.readyState !== WebSocket.OPEN) return;
   socket.close(code, reason.slice(0, 120));
+}
+
+function readResizeDimensions(frame: Record<string, unknown>): { cols: number; rows: number } | null {
+  const cols = typeof frame.cols === "number" && Number.isInteger(frame.cols) ? frame.cols : null;
+  const rows = typeof frame.rows === "number" && Number.isInteger(frame.rows) ? frame.rows : null;
+  if (
+    cols !== null
+    && rows !== null
+    && cols > 0
+    && rows > 0
+    && cols <= 9999
+    && rows <= 9999
+  ) {
+    return { cols, rows };
+  }
+  return null;
+}
+
+function parseJsonClientFrame(raw: unknown): Record<string, unknown> | null {
+  const text = decodeClientMessage(raw);
+  if (!text) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : null;
+}
+
+function readAuthTokenFrame(raw: unknown): string | null {
+  const frame = parseJsonClientFrame(raw);
+  if (!frame || frame.type !== "auth" || typeof frame.token !== "string") return null;
+  const token = frame.token.trim();
+  return token || null;
+}
+
+function readPreAuthResizeFrame(raw: unknown): { cols: number; rows: number } | null {
+  const frame = parseJsonClientFrame(raw);
+  return frame?.type === "resize" ? readResizeDimensions(frame) : null;
 }
 
 function handleClientFrame(
@@ -240,20 +307,12 @@ function handleClientFrame(
     return;
   }
   if (frame.type === "resize") {
-    const cols = typeof frame.cols === "number" && Number.isInteger(frame.cols) ? frame.cols : null;
-    const rows = typeof frame.rows === "number" && Number.isInteger(frame.rows) ? frame.rows : null;
-    if (
-      cols !== null
-      && rows !== null
-      && cols > 0
-      && rows > 0
-      && cols <= 9999
-      && rows <= 9999
-    ) {
+    const dimensions = readResizeDimensions(frame);
+    if (dimensions) {
       if (shell) {
-        shell.resize(cols, rows);
+        shell.resize(dimensions.cols, dimensions.rows);
       } else {
-        onPendingResize?.({ cols, rows });
+        onPendingResize?.(dimensions);
       }
     }
     return;
@@ -380,7 +439,7 @@ class Ssh2Shell implements EnvironmentCustomImageSshShell {
 
 export function createSsh2EnvironmentCustomImageSshConnector(): EnvironmentCustomImageSshConnector {
   return {
-    connect: async ({ ssh, term, cols, rows }) => {
+    connect: async ({ ssh, term, cols, rows, verifyHostKeySha256 }) => {
       const { Client } = require("ssh2") as {
         Client: new () => {
           once(event: "ready", listener: () => void): void;
@@ -428,6 +487,8 @@ export function createSsh2EnvironmentCustomImageSshConnector(): EnvironmentCusto
           host: ssh.host,
           port: ssh.port,
           username: ssh.username,
+          hostHash: "sha256",
+          hostVerifier: (hostKeySha256: string) => verifyHostKeySha256(hostKeySha256),
           readyTimeout: 20000,
           keepaliveInterval: 15000,
           keepaliveCountMax: 3,
@@ -457,32 +518,41 @@ export function setupEnvironmentCustomImageTerminalWebSocketServer(
   const sshConnector = opts.sshConnector ?? createSsh2EnvironmentCustomImageSshConnector();
 
   wss.on("connection", (socket: TerminalWsSocket, req: IncomingMessage) => {
-    const context = (req as IncomingMessageWithTerminalContext).paperclipTerminalUpgradeContext;
-    if (!context) {
+    const upgradeContext = (req as IncomingMessageWithTerminalContext).paperclipTerminalUpgradeContext;
+    if (!upgradeContext) {
       socket.close(1008, "missing context");
       return;
     }
 
     let shell: EnvironmentCustomImageSshShell | null = null;
     let pendingResize: { cols: number; rows: number } | null = null;
+    let preAuthResize: { cols: number; rows: number } | null = null;
     let cleanupRegistry: (() => void) | null = null;
+    let authenticatedContext: AuthenticatedTerminalContext | null = null;
+    let authenticating = false;
+    let authenticated = false;
     let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+    let authTimer: ReturnType<typeof setTimeout> | null = null;
     let cleanedUp = false;
 
     const cleanup = (reason: string) => {
       if (cleanedUp) return;
       cleanedUp = true;
+      if (authTimer) clearTimeout(authTimer);
       if (expiryTimer) clearTimeout(expiryTimer);
       cleanupRegistry?.();
       cleanupRegistry = null;
-      sessionStore.delete(context.terminalSession.id);
+      const terminalSessionId = authenticatedContext?.terminalSession.id ?? upgradeContext.terminalSessionId;
+      if (authenticatedContext) {
+        sessionStore.delete(authenticatedContext.terminalSession.id);
+      }
       if (shell) {
         shell.close();
         shell = null;
       }
       logger.info({
-        setupSessionId: context.setupSessionId,
-        terminalSessionId: context.terminalSession.id,
+        setupSessionId: upgradeContext.setupSessionId,
+        terminalSessionId,
         reason,
       }, "custom image terminal websocket closed");
     };
@@ -493,19 +563,149 @@ export function setupEnvironmentCustomImageTerminalWebSocketServer(
       cleanup(reason);
     };
 
-    cleanupRegistry = connectionRegistry.add({
-      setupSessionId: context.setupSessionId,
-      close: (reason) => {
-        closeTerminal(reason);
-      },
-    });
+    const startAuthenticatedTerminal = (context: AuthenticatedTerminalContext) => {
+      authenticatedContext = context;
+      if (authTimer) {
+        clearTimeout(authTimer);
+        authTimer = null;
+      }
+      if (preAuthResize) {
+        pendingResize = preAuthResize;
+        preAuthResize = null;
+      }
 
-    const expiresInMs = Math.max(0, context.terminalSession.sessionExpiresAt.getTime() - Date.now());
-    expiryTimer = setTimeout(() => {
-      closeTerminal("expired", 1008, "expired");
-    }, expiresInMs);
+      cleanupRegistry = connectionRegistry.add({
+        setupSessionId: context.setupSessionId,
+        close: (reason) => {
+          closeTerminal(reason);
+        },
+      });
+
+      const expiresInMs = Math.max(0, context.terminalSession.sessionExpiresAt.getTime() - Date.now());
+      expiryTimer = setTimeout(() => {
+        closeTerminal("expired", 1008, "expired");
+      }, expiresInMs);
+
+      void sshConnector.connect({
+        ssh: context.ssh,
+        term: "xterm-256color",
+        cols: context.initialCols,
+        rows: context.initialRows,
+        verifyHostKeySha256: (hostKeySha256) => sessionStore.verifyOrPinHostKey({
+          id: context.terminalSession.id,
+          hostKeySha256,
+        }),
+      })
+        .then((connectedShell) => {
+          if (cleanedUp) {
+            connectedShell.close();
+            return;
+          }
+          shell = connectedShell;
+          if (pendingResize) {
+            shell.resize(pendingResize.cols, pendingResize.rows);
+            pendingResize = null;
+          }
+          shell.onData((data) => {
+            sendJson(socket, { type: "output", data });
+          });
+          shell.onClose(() => {
+            if (cleanedUp) return;
+            closeTerminal("ssh_closed");
+          });
+          shell.onError((err) => {
+            if (cleanedUp) return;
+            logger.warn({
+              errorName: safeErrorName(err),
+              setupSessionId: context.setupSessionId,
+              terminalSessionId: context.terminalSession.id,
+            }, "custom image terminal ssh stream failed");
+            sendJson(socket, { type: "error", message: "SSH terminal connection failed." });
+            closeClient(socket, 1011, "ssh error");
+            cleanup("ssh_error");
+          });
+          sendJson(socket, {
+            type: "ready",
+            setupSessionId: context.setupSessionId,
+            terminalSessionId: context.terminalSession.id,
+          });
+        })
+        .catch((err) => {
+          logger.warn({
+            errorName: safeErrorName(err),
+            setupSessionId: context.setupSessionId,
+            terminalSessionId: context.terminalSession.id,
+          }, "custom image terminal ssh connection failed");
+          sendJson(socket, { type: "error", message: "SSH terminal connection failed." });
+          closeClient(socket, 1011, "ssh error");
+          cleanup("ssh_connect_error");
+        });
+    };
+
+    authTimer = setTimeout(() => {
+      sendJson(socket, { type: "error", message: "Terminal authentication timed out." });
+      closeClient(socket, 1008, "terminal auth timeout");
+      cleanup("auth_timeout");
+    }, TERMINAL_AUTH_TIMEOUT_MS);
 
     socket.on("message", (data: unknown) => {
+      if (!authenticated) {
+        const resize = readPreAuthResizeFrame(data);
+        if (resize) {
+          preAuthResize = resize;
+          return;
+        }
+
+        const token = readAuthTokenFrame(data);
+        if (!token) {
+          sendJson(socket, { type: "error", message: "Terminal authentication is required." });
+          closeClient(socket, 1008, "terminal auth required");
+          cleanup("auth_frame_invalid");
+          return;
+        }
+        if (authenticating) return;
+        authenticating = true;
+
+        void validateTerminalUpgrade({
+          setupSessionId: upgradeContext.setupSessionId,
+          terminalSessionId: upgradeContext.terminalSessionId,
+          token,
+          now: new Date(),
+          sessionStore,
+          customImages,
+        })
+          .then((terminalSession) => {
+            authenticating = false;
+            if (cleanedUp || socket.readyState !== WebSocket.OPEN) {
+              sessionStore.delete(terminalSession.id);
+              return;
+            }
+            authenticated = true;
+            startAuthenticatedTerminal({
+              setupSessionId: upgradeContext.setupSessionId,
+              terminalSession,
+              ssh: terminalSession.ssh,
+              initialCols: upgradeContext.initialCols,
+              initialRows: upgradeContext.initialRows,
+            });
+          })
+          .catch((err) => {
+            authenticating = false;
+            logger.warn({
+              errorName: safeErrorName(err),
+              setupSessionId: upgradeContext.setupSessionId,
+              terminalSessionId: upgradeContext.terminalSessionId,
+            }, "custom image terminal websocket authentication rejected");
+            sendJson(socket, {
+              type: "error",
+              message: clientSafeErrorMessage(err, "Terminal authentication failed."),
+            });
+            closeClient(socket, errorStatus(err) >= 500 ? 1011 : 1008, "terminal auth rejected");
+            cleanup("auth_rejected");
+          });
+        return;
+      }
+
       handleClientFrame(socket, shell, data, (dimensions) => {
         pendingResize = dimensions;
       });
@@ -518,57 +718,6 @@ export function setupEnvironmentCustomImageTerminalWebSocketServer(
     socket.on("error", () => {
       cleanup("client_error");
     });
-
-    void sshConnector.connect({
-      ssh: context.ssh,
-      term: "xterm-256color",
-      cols: context.initialCols,
-      rows: context.initialRows,
-    })
-      .then((connectedShell) => {
-        if (cleanedUp) {
-          connectedShell.close();
-          return;
-        }
-        shell = connectedShell;
-        if (pendingResize) {
-          shell.resize(pendingResize.cols, pendingResize.rows);
-          pendingResize = null;
-        }
-        shell.onData((data) => {
-          sendJson(socket, { type: "output", data });
-        });
-        shell.onClose(() => {
-          if (cleanedUp) return;
-          closeTerminal("ssh_closed");
-        });
-        shell.onError((err) => {
-          if (cleanedUp) return;
-          logger.warn({
-            errorName: safeErrorName(err),
-            setupSessionId: context.setupSessionId,
-            terminalSessionId: context.terminalSession.id,
-          }, "custom image terminal ssh stream failed");
-          sendJson(socket, { type: "error", message: "SSH terminal connection failed." });
-          closeClient(socket, 1011, "ssh error");
-          cleanup("ssh_error");
-        });
-        sendJson(socket, {
-          type: "ready",
-          setupSessionId: context.setupSessionId,
-          terminalSessionId: context.terminalSession.id,
-        });
-      })
-      .catch((err) => {
-        logger.warn({
-          errorName: safeErrorName(err),
-          setupSessionId: context.setupSessionId,
-          terminalSessionId: context.terminalSession.id,
-        }, "custom image terminal ssh connection failed");
-        sendJson(socket, { type: "error", message: "SSH terminal connection failed." });
-        closeClient(socket, 1011, "ssh error");
-        cleanup("ssh_connect_error");
-      });
   });
 
   wss.on("close", () => {
@@ -596,9 +745,10 @@ export function setupEnvironmentCustomImageTerminalWebSocketServer(
     if (!path) return;
 
     reqWithContext.paperclipWebSocketHandled = true;
+    const logPath = safeUpgradePath(req.url);
 
     const onRawSocketError = (err: Error) => {
-      logger.warn({ errorName: safeErrorName(err), path: req.url }, "custom image terminal websocket upgrade socket error");
+      logger.warn({ errorName: safeErrorName(err), path: logPath }, "custom image terminal websocket upgrade socket error");
     };
     const cleanupRawSocketListeners = () => {
       socket.off("error", onRawSocketError);
@@ -609,45 +759,24 @@ export function setupEnvironmentCustomImageTerminalWebSocketServer(
     socket.once("close", cleanupRawSocketListeners);
 
     const terminalSessionId = url.searchParams.get("terminalSessionId")?.trim() ?? "";
-    const token = url.searchParams.get("token")?.trim() ?? "";
     const initialCols = parseTerminalDimension(url.searchParams.get("cols"), 80);
     const initialRows = parseTerminalDimension(url.searchParams.get("rows"), 24);
-    if (!terminalSessionId || !token) {
-      rejectUpgrade(socket, "400 Bad Request", "missing terminal credentials");
+    if (!terminalSessionId) {
+      rejectUpgrade(socket, "400 Bad Request", "missing terminal session");
       return;
     }
 
-    void validateTerminalUpgrade({
+    reqWithContext.paperclipTerminalUpgradeContext = {
       setupSessionId: path.setupSessionId,
       terminalSessionId,
-      token,
-      now: new Date(),
-      sessionStore,
-      customImages,
-    })
-      .then((terminalSession) => {
-        if (!isWritableUpgradeSocket(socket)) {
-          cleanupRawSocketListeners();
-          return;
-        }
+      initialCols,
+      initialRows,
+    };
 
-        reqWithContext.paperclipTerminalUpgradeContext = {
-          setupSessionId: path.setupSessionId,
-          terminalSession,
-          ssh: terminalSession.ssh,
-          initialCols,
-          initialRows,
-        };
-
-        cleanupRawSocketListeners();
-        wss.handleUpgrade(req, socket, head, (ws: TerminalWsSocket) => {
-          wss.emit("connection", ws, reqWithContext);
-        });
-      })
-      .catch((err) => {
-        logger.warn({ errorName: safeErrorName(err), path: req.url }, "custom image terminal websocket upgrade rejected");
-        rejectUpgrade(socket, statusLineForError(err), "terminal websocket upgrade rejected");
-      });
+    cleanupRawSocketListeners();
+    wss.handleUpgrade(req, socket, head, (ws: TerminalWsSocket) => {
+      wss.emit("connection", ws, reqWithContext);
+    });
   });
 
   return wss;

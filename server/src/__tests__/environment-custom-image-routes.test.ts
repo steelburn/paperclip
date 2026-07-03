@@ -366,6 +366,8 @@ describe("environment customImage setup routes", () => {
     expect(res.body.websocketPath).toContain(
       `/api/environment-custom-image-setup-sessions/session-1/terminal/ws?terminalSessionId=${encodeURIComponent(res.body.id)}`,
     );
+    expect(res.body.websocketPath).not.toContain("token=");
+    expect(res.body.websocketPath).not.toContain(res.body.token);
     expect(mockEnvironmentCustomImageService.refreshSetupSession).toHaveBeenCalledWith({
       sessionId: "session-1",
       includeConnectionPayload: true,

@@ -515,6 +515,7 @@ function EnvironmentCustomImageBrowserTerminal({
       socket.onopen = () => {
         if (socketRef.current !== socket) return;
         xtermRef.current?.focus();
+        socket.send(JSON.stringify({ type: "auth", token: terminalToken.token }));
         sendTerminalResize(true);
       };
 

@@ -126,6 +126,7 @@ describe("EnvironmentCustomImageTerminalSessionStore", () => {
     expect(minted.session.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(minted.session.connectExpiresAt.toISOString()).toBe("2026-06-25T20:05:00.000Z");
     expect(minted.session.sessionExpiresAt.toISOString()).toBe("2026-06-25T20:30:00.000Z");
+    expect(minted.session.hostKeySha256).toBeNull();
     expect(store.get({
       id: minted.session.id,
       token: minted.token,
@@ -169,6 +170,42 @@ describe("EnvironmentCustomImageTerminalSessionStore", () => {
 
     expect(store.cleanupExpired(new Date("2026-06-25T20:30:00.000Z"))).toBe(1);
     expect(store.getById(minted.session.id, new Date("2026-06-25T20:30:00.000Z"))).toBeNull();
+  });
+
+  it("pins the first SSH host key fingerprint for a terminal session", () => {
+    const store = new EnvironmentCustomImageTerminalSessionStore();
+    const now = new Date("2026-06-25T20:00:00.000Z");
+    const minted = store.create({
+      setupSessionId: "session-1",
+      companyId: "company-1",
+      environmentId: "env-1",
+      provider: "daytona",
+      ssh: { username: "ssh-token-secret", host: "203.0.113.10", port: 2222 },
+      setupExpiresAt: new Date("2026-06-25T20:30:00.000Z"),
+      now,
+    });
+
+    expect(store.verifyOrPinHostKey({
+      id: minted.session.id,
+      hostKeySha256: "first-host-key-sha256",
+    }, now)).toBe(true);
+    expect(store.getById(minted.session.id, now)?.hostKeySha256).toBe("first-host-key-sha256");
+    expect(store.verifyOrPinHostKey({
+      id: minted.session.id,
+      hostKeySha256: "first-host-key-sha256",
+    }, now)).toBe(true);
+    expect(store.verifyOrPinHostKey({
+      id: minted.session.id,
+      hostKeySha256: "changed-host-key-sha256",
+    }, now)).toBe(false);
+    expect(store.verifyOrPinHostKey({
+      id: minted.session.id,
+      hostKeySha256: "",
+    }, now)).toBe(false);
+    expect(store.verifyOrPinHostKey({
+      id: minted.session.id,
+      hostKeySha256: "first-host-key-sha256",
+    }, new Date("2026-06-25T20:30:00.000Z"))).toBe(false);
   });
 
   it("deletes all tokens for a setup session", () => {

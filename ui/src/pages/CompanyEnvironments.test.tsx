@@ -385,7 +385,7 @@ describe("CompanyEnvironments — test provider button", () => {
       environmentId: "env-1",
       connectionType: "ssh",
       websocketPath:
-        "/api/environment-custom-image-setup-sessions/session-1/terminal/ws?terminalSessionId=terminal-session-1&token=terminal-token-terminal-token-123456",
+        "/api/environment-custom-image-setup-sessions/session-1/terminal/ws?terminalSessionId=terminal-session-1",
     });
     mockEnvironmentsApi.finishCustomImageSetupSession.mockResolvedValue({
       session: createSession({ status: "promoted", promotedTemplateId: "template-1", finishedAt: "2026-06-25T20:10:00.000Z" }),
@@ -783,6 +783,8 @@ describe("CompanyEnvironments — test provider button", () => {
     expect(FakeWebSocket.instances[0].url).toContain(
       "/api/environment-custom-image-setup-sessions/session-1/terminal/ws?terminalSessionId=terminal-session-1",
     );
+    expect(FakeWebSocket.instances[0].url).not.toContain("token=");
+    expect(FakeWebSocket.instances[0].url).not.toContain("terminal-token-terminal-token-123456");
     expect(FakeWebSocket.instances[0].url).toContain("cols=120");
     expect(FakeWebSocket.instances[0].url).toContain("rows=32");
     expect(xtermMocks.terminalInstances[0].options.cursorBlink).toBe(true);
@@ -812,6 +814,10 @@ describe("CompanyEnvironments — test provider button", () => {
       expect(document.activeElement).toBe(terminalScreen);
       expect(getOpenDialog()?.textContent).toContain(command);
     });
+    expect(FakeWebSocket.instances[0].sent).toContain(JSON.stringify({
+      type: "auth",
+      token: "terminal-token-terminal-token-123456",
+    }));
     expect(FakeWebSocket.instances[0].sent).toContain(JSON.stringify({ type: "resize", cols: 120, rows: 32 }));
 
     await act(async () => {

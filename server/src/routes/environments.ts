@@ -500,7 +500,7 @@ export function environmentRoutes(
         connectionType: "ssh",
         websocketPath:
           `/api/environment-custom-image-setup-sessions/${encodeURIComponent(minted.session.setupSessionId)}/terminal/ws`
-          + `?terminalSessionId=${encodeURIComponent(minted.session.id)}&token=${encodeURIComponent(minted.token)}`,
+          + `?terminalSessionId=${encodeURIComponent(minted.session.id)}`,
       });
     },
   );
