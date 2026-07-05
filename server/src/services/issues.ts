@@ -46,6 +46,7 @@ import type {
   IssueBlockedInboxAttention,
   IssueBlockedInboxIssueRef,
   IssueProductivityReview,
+  IssueProjectSummary,
   IssueProductivityReviewTrigger,
   IssueRelationIssueSummary,
   IssueWatchdogSummary,
@@ -360,6 +361,7 @@ type IssueWithLabels = IssueRow & {
   labels: IssueLabelRow[];
   labelIds: string[];
   watchdog?: IssueWatchdogSummary | null;
+  projects: IssueProjectSummary[];
 };
 type IssueWithLabelsAndRun = IssueWithLabels & { activeRun: IssueActiveRunRow | null };
 type IssueUserCommentStats = {
@@ -410,6 +412,7 @@ type ProjectGoalReader = Pick<Db, "select">;
 type DbReader = Pick<Db, "select">;
 type IssueProjectWriter = Pick<Db, "select" | "insert" | "update" | "delete">;
 type IssueCreateInput = Omit<typeof issues.$inferInsert, "companyId"> & {
+  projectIds?: string[];
   labelIds?: string[];
   blockedByIssueIds?: string[];
   inheritExecutionWorkspaceFromIssueId?: string | null;
@@ -434,6 +437,36 @@ function dedupeIssueProjectIds(projectIds: readonly string[]) {
     deduped.push(projectId);
   }
   return deduped;
+}
+
+function issueProjectMembershipCondition(companyId: string, projectId: string): SQL<boolean> {
+  return sql<boolean>`(
+    ${issues.projectId} = ${projectId}
+    OR EXISTS (
+      SELECT 1
+      FROM ${issueProjects}
+      WHERE ${issueProjects.companyId} = ${companyId}
+        AND ${issueProjects.issueId} = ${issues.id}
+        AND ${issueProjects.projectId} = ${projectId}
+    )
+  )`;
+}
+
+async function getIssueProjectIds(
+  tx: IssueProjectWriter,
+  issueId: string,
+): Promise<string[]> {
+  const rows = await tx
+    .select({ projectId: issueProjects.projectId })
+    .from(issueProjects)
+    .where(eq(issueProjects.issueId, issueId))
+    .orderBy(desc(issueProjects.isPrimary), asc(issueProjects.createdAt), asc(issueProjects.projectId));
+  return rows.map((row) => row.projectId);
+}
+
+function mergeLegacyPrimaryProjectId(projectId: string | null, currentProjectIds: readonly string[]) {
+  if (!projectId) return [];
+  return [projectId, ...currentProjectIds.filter((existingProjectId) => existingProjectId !== projectId)];
 }
 
 async function validateIssueProjectIds(
@@ -1453,12 +1486,56 @@ async function labelMapForIssues(dbOrTx: any, issueIds: string[]): Promise<Map<s
   return map;
 }
 
+async function issueProjectMapForIssues(dbOrTx: any, issueIds: string[]) {
+  const map = new Map<string, Array<{
+    id: string;
+    name: string;
+    color: string | null;
+    icon: string | null;
+    isPrimary: boolean;
+  }>>();
+  if (issueIds.length === 0) return map;
+  for (const issueIdChunk of chunkList(issueIds, ISSUE_LIST_RELATED_QUERY_CHUNK_SIZE)) {
+    const rows = await dbOrTx
+      .select({
+        issueId: issueProjects.issueId,
+        projectId: projects.id,
+        name: projects.name,
+        color: projects.color,
+        icon: projects.icon,
+        isPrimary: issueProjects.isPrimary,
+      })
+      .from(issueProjects)
+      .innerJoin(projects, and(
+        eq(issueProjects.projectId, projects.id),
+        eq(issueProjects.companyId, projects.companyId),
+      ))
+      .where(inArray(issueProjects.issueId, issueIdChunk))
+      .orderBy(desc(issueProjects.isPrimary), asc(issueProjects.createdAt), asc(issueProjects.projectId));
+
+    for (const row of rows) {
+      const project = {
+        id: row.projectId,
+        name: row.name,
+        color: row.color,
+        icon: row.icon,
+        isPrimary: row.isPrimary,
+      };
+      const existing = map.get(row.issueId);
+      if (existing) existing.push(project);
+      else map.set(row.issueId, [project]);
+    }
+  }
+  return map;
+}
+
 async function withIssueLabels(dbOrTx: any, rows: IssueRow[]): Promise<IssueWithLabels[]> {
   if (rows.length === 0) return [];
   const issueIds = rows.map((row) => row.id);
-  const [labelsByIssueId, watchdogByIssueId] = await Promise.all([
+  const [labelsByIssueId, watchdogByIssueId, projectsByIssueId] = await Promise.all([
     labelMapForIssues(dbOrTx, issueIds),
     watchdogMapForIssues(dbOrTx, rows),
+    issueProjectMapForIssues(dbOrTx, issueIds),
   ]);
   return rows.map((row) => {
     const issueLabels = labelsByIssueId.get(row.id) ?? [];
@@ -1467,6 +1544,7 @@ async function withIssueLabels(dbOrTx: any, rows: IssueRow[]): Promise<IssueWith
       labels: issueLabels,
       labelIds: issueLabels.map((label) => label.id),
       watchdog: watchdogByIssueId.get(row.id) ?? null,
+      projects: projectsByIssueId.get(row.id) ?? [],
     };
   });
 }
@@ -1526,7 +1604,18 @@ function lowTrustBoundaryIssueCondition(
   const issueIds = [...new Set(boundary.issueIds ?? [])];
   const projectIds = [...new Set(boundary.projectIds ?? [])];
   if (issueIds.length > 0) clauses.push(inArray(issues.id, issueIds));
-  if (projectIds.length > 0) clauses.push(inArray(issues.projectId, projectIds));
+  if (projectIds.length > 0) {
+    clauses.push(sql<boolean>`
+      ${issues.projectId} IN (${sql.join(projectIds.map((projectId) => sql`${projectId}`), sql`, `)})
+      OR EXISTS (
+        SELECT 1
+        FROM ${issueProjects}
+        WHERE ${issueProjects.companyId} = ${companyId}
+          AND ${issueProjects.issueId} = ${issues.id}
+          AND ${issueProjects.projectId} IN (${sql.join(projectIds.map((projectId) => sql`${projectId}`), sql`, `)})
+      )
+    `);
+  }
   if (boundary.rootIssueId) {
     clauses.push(sql<boolean>`
       ${issues.id} IN (
@@ -3354,7 +3443,7 @@ async function blockedInboxIssueConditions(
   if (touchedByUserId) conditions.push(touchedByUserCondition(companyId, touchedByUserId));
   if (inboxArchivedByUserId) conditions.push(inboxVisibleForUserCondition(companyId, inboxArchivedByUserId));
   if (unreadForUserId) conditions.push(unreadForUserCondition(companyId, unreadForUserId));
-  if (filters?.projectId) conditions.push(eq(issues.projectId, filters.projectId));
+  if (filters?.projectId) conditions.push(issueProjectMembershipCondition(companyId, filters.projectId));
   if (filters?.workspaceId) {
     conditions.push(or(
       eq(issues.executionWorkspaceId, filters.workspaceId),
@@ -4604,7 +4693,7 @@ export function issueService(db: Db) {
       if (unreadForUserId) {
         conditions.push(unreadForUserCondition(companyId, unreadForUserId));
       }
-      if (filters?.projectId) conditions.push(eq(issues.projectId, filters.projectId));
+      if (filters?.projectId) conditions.push(issueProjectMembershipCondition(companyId, filters.projectId));
       if (filters?.workspaceId) {
         conditions.push(or(
           eq(issues.executionWorkspaceId, filters.workspaceId),
@@ -4781,7 +4870,7 @@ export function issueService(db: Db) {
         conditions.push(eq(issues.assigneeAgentId, assigneeAgentFilter));
       }
       if (filters?.assigneeUserId) conditions.push(eq(issues.assigneeUserId, filters.assigneeUserId));
-      if (filters?.projectId) conditions.push(eq(issues.projectId, filters.projectId));
+      if (filters?.projectId) conditions.push(issueProjectMembershipCondition(companyId, filters.projectId));
       if (filters?.workspaceId) {
         conditions.push(or(
           eq(issues.executionWorkspaceId, filters.workspaceId),
@@ -5121,9 +5210,16 @@ export function issueService(db: Db) {
         actorUserId,
         ...issueData
       } = data;
+      const inheritedProjectIds =
+        issueData.projectIds === undefined && issueData.projectId === undefined
+          ? await getIssueProjectIds(db, parent.id).then((projectIds) =>
+            projectIds.length > 0 ? projectIds : (parent.projectId ? [parent.projectId] : []),
+          )
+          : null;
       let child = await issueService(db).create(parent.companyId, {
         ...issueData,
         parentId: parent.id,
+        ...(inheritedProjectIds ? { projectIds: inheritedProjectIds } : {}),
         projectId: issueData.projectId ?? parent.projectId,
         goalId: issueData.goalId ?? parent.goalId,
         requestDepth: clampIssueRequestDepth(
@@ -5430,6 +5526,7 @@ export function issueService(db: Db) {
       data: IssueCreateInput,
     ) => {
       const {
+        projectIds,
         labelIds: inputLabelIds,
         blockedByIssueIds,
         inheritExecutionWorkspaceFromIssueId,
@@ -5456,6 +5553,13 @@ export function issueService(db: Db) {
         throw unprocessable("in_progress issues require an assignee");
       }
       return db.transaction(async (tx) => {
+        const nextProjectIds = projectIds !== undefined ? dedupeIssueProjectIds(projectIds) : null;
+        if (nextProjectIds) {
+          if (nextProjectIds.length > MAX_ISSUE_PROJECTS) {
+            throw unprocessable(`Issues can belong to at most ${MAX_ISSUE_PROJECTS} projects`);
+          }
+          issueData.projectId = nextProjectIds[0] ?? null;
+        }
         const defaultCompanyGoal = await getDefaultCompanyGoal(tx, companyId);
         let projectWorkspaceId = issueData.projectWorkspaceId ?? null;
         let executionWorkspaceId = issueData.executionWorkspaceId ?? null;
@@ -5619,9 +5723,7 @@ export function issueService(db: Db) {
         );
 
         const [issue] = await tx.insert(issues).values(values).returning();
-        if (issue.projectId) {
-          await setIssueProjects(tx, issue.id, [issue.projectId]);
-        }
+        await setIssueProjects(tx, issue.id, nextProjectIds ?? (issue.projectId ? [issue.projectId] : []));
         if (watchdog) {
           await upsertIssueWatchdogForIssue(tx, companyId, issue.id, {
             agentId: watchdog.agentId,
@@ -5657,6 +5759,7 @@ export function issueService(db: Db) {
     update: async (
       id: string,
       data: Partial<typeof issues.$inferInsert> & {
+        projectIds?: string[];
         labelIds?: string[];
         blockedByIssueIds?: string[];
         actorAgentId?: string | null;
@@ -5672,12 +5775,20 @@ export function issueService(db: Db) {
       if (!existing) return null;
 
       const {
+        projectIds,
         labelIds: nextLabelIds,
         blockedByIssueIds,
         actorAgentId,
         actorUserId,
         ...issueData
       } = data;
+      const nextProjectIdsExplicit = projectIds !== undefined ? dedupeIssueProjectIds(projectIds) : null;
+      if (nextProjectIdsExplicit && nextProjectIdsExplicit.length > MAX_ISSUE_PROJECTS) {
+        throw unprocessable(`Issues can belong to at most ${MAX_ISSUE_PROJECTS} projects`);
+      }
+      if (nextProjectIdsExplicit) {
+        issueData.projectId = nextProjectIdsExplicit[0] ?? null;
+      }
       const isolatedWorkspacesEnabled = (await instanceSettings.getExperimental()).enableIsolatedWorkspaces;
       if (!isolatedWorkspacesEnabled) {
         delete issueData.executionWorkspaceId;
@@ -5795,6 +5906,10 @@ export function issueService(db: Db) {
 
       const runUpdate = async (tx: any) => {
         const defaultCompanyGoal = await getDefaultCompanyGoal(tx, existing.companyId);
+        const currentProjectIds =
+          nextProjectIdsExplicit === null && issueData.projectId !== undefined
+            ? await getIssueProjectIds(tx, existing.id)
+            : [];
         const [currentProjectGoalId, nextProjectGoalId] = await Promise.all([
           getProjectDefaultGoalId(tx, existing.companyId, existing.projectId),
           getProjectDefaultGoalId(
@@ -5820,8 +5935,10 @@ export function issueService(db: Db) {
           .returning()
           .then((rows: Array<typeof issues.$inferSelect>) => rows[0] ?? null);
         if (!updated) return null;
-        if (issueData.projectId !== undefined || patch.projectId !== undefined) {
-          await setIssueProjects(tx, updated.id, updated.projectId ? [updated.projectId] : []);
+        if (nextProjectIdsExplicit !== null) {
+          await setIssueProjects(tx, updated.id, nextProjectIdsExplicit);
+        } else if (issueData.projectId !== undefined || patch.projectId !== undefined) {
+          await setIssueProjects(tx, updated.id, mergeLegacyPrimaryProjectId(updated.projectId ?? null, currentProjectIds));
         }
         if (nextLabelIds !== undefined) {
           await syncIssueLabels(updated.id, existing.companyId, nextLabelIds, tx);
