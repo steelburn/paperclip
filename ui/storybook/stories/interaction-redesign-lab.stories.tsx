@@ -23,9 +23,11 @@ import { cn } from "@/lib/utils";
 /**
  * Interaction Redesign Lab — PAP-12679 (parent PAP-12669).
  *
- * Ten candidate "lighter" treatments for issue-thread interaction cards, all
+ * Candidate "lighter" treatments for issue-thread interaction cards, all
  * rendered from the same shared fixtures so visual weight can be compared
- * directly. Each variant renders the same trio:
+ * directly. Variants 01–10 are the original exploration; Variant 11 is the
+ * post-review (PAP-12696) recommended hybrid: V03 shell + V01 body.
+ * Each variant renders the same trio:
  *
  *   1. pending ask_user_questions (two questions, single + multi select)
  *   2. pending request_checkbox_confirmation (four options)
@@ -171,9 +173,6 @@ function CompactHeader({
       >
         {status}
       </span>
-      <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-        {AGENT_NAME} · {CREATED_LABEL}
-      </span>
     </div>
   );
 }
@@ -199,7 +198,7 @@ function Variant01Compact() {
                       type="button"
                       onClick={() => toggle(question.id, option.id, question.selectionMode)}
                       className={cn(
-                        "flex items-center gap-2 rounded-sm border px-2.5 py-1.5 text-left text-sm transition-colors",
+                        "flex items-center gap-2 rounded-sm border px-2.5 py-2 text-left text-sm transition-colors",
                         selected
                           ? "border-primary/50 bg-primary/5 text-foreground"
                           : "border-border/60 text-muted-foreground hover:bg-accent/50",
@@ -236,13 +235,19 @@ function Variant01Compact() {
           {cbOptions.map((option) => (
             <label
               key={option.id}
-              className="flex cursor-pointer items-center gap-2 rounded-sm px-1 py-1 text-sm text-foreground hover:bg-accent/50"
+              className="flex cursor-pointer items-start gap-2 rounded-sm px-1 py-1.5 text-sm text-foreground hover:bg-accent/50"
             >
-              <Checkbox checked={checked.has(option.id)} onCheckedChange={() => toggleChecked(option.id)} />
-              <span className="min-w-0 flex-1 truncate">{option.label}</span>
-              {option.description ? (
-                <span className="hidden truncate text-xs text-muted-foreground md:inline">{option.description}</span>
-              ) : null}
+              <Checkbox
+                className="mt-0.5"
+                checked={checked.has(option.id)}
+                onCheckedChange={() => toggleChecked(option.id)}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{option.label}</span>
+                {option.description ? (
+                  <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{option.description}</span>
+                ) : null}
+              </span>
             </label>
           ))}
         </div>
@@ -257,14 +262,12 @@ function Variant01Compact() {
         </div>
       </div>
 
-      <div className="rounded-md border border-border bg-card px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
-          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{doneInteraction.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            Approved by {RESOLVER_NAME} · {RESOLVED_LABEL}
-          </span>
-        </div>
+      <div className="flex items-center gap-2 px-1 py-1.5">
+        <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{doneInteraction.title}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          Approved by {RESOLVER_NAME} · {RESOLVED_LABEL}
+        </span>
       </div>
     </div>
   );
@@ -282,7 +285,7 @@ function Variant02Borderless() {
   return (
     <div className="space-y-5">
       <div className="border-l-2 border-yellow-500/60 pl-4">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           Questions · {AGENT_NAME} · {CREATED_LABEL}
         </div>
         <div className="mt-1 text-sm font-medium text-foreground">{qInteraction.title}</div>
@@ -326,7 +329,7 @@ function Variant02Borderless() {
       </div>
 
       <div className="border-l-2 border-yellow-500/60 pl-4">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           Confirm selection · {AGENT_NAME} · {CREATED_LABEL}
         </div>
         <div className="mt-1 text-sm font-medium text-foreground">{cbPayload.prompt}</div>
@@ -366,6 +369,7 @@ function CollapsedRow({
   title,
   meta,
   tone,
+  badge,
   defaultOpen,
   children,
 }: {
@@ -373,48 +377,64 @@ function CollapsedRow({
   title: string;
   meta: string;
   tone: "pending" | "done";
+  badge?: string;
   defaultOpen?: boolean;
   children?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen ?? false);
   const expandable = Boolean(children);
+  const row = (
+    <>
+      {expandable ? (
+        open ? (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        )
+      ) : (
+        <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+      )}
+      <Icon
+        className={cn(
+          "h-3.5 w-3.5 shrink-0",
+          tone === "pending" ? "text-yellow-600 dark:text-yellow-400" : "text-muted-foreground",
+        )}
+      />
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{title}</span>
+      {badge ? (
+        <span className="shrink-0 rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] font-medium text-yellow-600 dark:text-yellow-400">
+          {badge}
+        </span>
+      ) : null}
+      <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{meta}</span>
+    </>
+  );
   return (
     <div className="rounded-md border border-border bg-card">
-      <button
-        type="button"
-        disabled={!expandable}
-        onClick={() => setOpen((value) => !value)}
-        className={cn(
-          "flex w-full items-center gap-2 px-3 py-2 text-left",
-          expandable ? "cursor-pointer hover:bg-accent/40" : "cursor-default",
-        )}
-      >
-        {expandable ? (
-          open ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          )
-        ) : (
-          <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
-        )}
-        <Icon
-          className={cn(
-            "h-3.5 w-3.5 shrink-0",
-            tone === "pending" ? "text-yellow-600 dark:text-yellow-400" : "text-muted-foreground",
-          )}
-        />
-        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{title}</span>
-        <span className="shrink-0 text-xs text-muted-foreground">{meta}</span>
-      </button>
+      {expandable ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="flex min-h-10 w-full cursor-pointer items-center gap-2 px-3 py-2 text-left hover:bg-accent/40"
+        >
+          {row}
+        </button>
+      ) : (
+        <div className="flex min-h-10 w-full items-center gap-2 px-3 py-2">{row}</div>
+      )}
       {expandable && open ? <div className="border-t border-border/60 px-3 pb-3 pt-2.5">{children}</div> : null}
     </div>
   );
 }
 
-function Variant03Collapsed({ expandFirst }: { expandFirst?: boolean }) {
+function Variant03Collapsed({ collapsePending }: { collapsePending?: boolean }) {
   const { answers, toggle } = useAnswers();
   const { checked, toggle: toggleChecked } = useChecked();
+
+  // Semantic default-open: pending + required interactions auto-expand;
+  // resolved (and optional) rows stay permanently collapsed.
+  const pendingOpen = !collapsePending;
 
   return (
     <div className="space-y-2">
@@ -423,7 +443,8 @@ function Variant03Collapsed({ expandFirst }: { expandFirst?: boolean }) {
         title={qInteraction.title ?? ""}
         meta={`2 questions · ${AGENT_NAME}`}
         tone="pending"
-        defaultOpen={expandFirst}
+        badge="Needs answers"
+        defaultOpen={pendingOpen}
       >
         <div className="space-y-3">
           {qPayload.questions.map((question) => (
@@ -469,6 +490,8 @@ function Variant03Collapsed({ expandFirst }: { expandFirst?: boolean }) {
         title={cbInteraction.title ?? ""}
         meta={`${cbOptions.length} options · ${AGENT_NAME}`}
         tone="pending"
+        badge="Needs selection"
+        defaultOpen={pendingOpen}
       >
         <div className="space-y-1">
           {cbOptions.map((option) => (
@@ -530,7 +553,7 @@ function Variant04ChatNative() {
           {qPayload.questions.map((question) => (
             <div key={question.id}>
               <div className="text-sm font-medium text-foreground">{question.prompt}</div>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <div className="mt-1 flex flex-col gap-0.5">
                 {(question.options ?? []).map((option) => {
                   const selected = (answers[question.id] ?? []).includes(option.id);
                   return (
@@ -538,14 +561,18 @@ function Variant04ChatNative() {
                       key={option.id}
                       type="button"
                       onClick={() => toggle(question.id, option.id, question.selectionMode)}
-                      className={cn(
-                        "rounded-md border px-2.5 py-1 text-xs transition-colors",
-                        selected
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-background text-foreground hover:bg-accent/60",
-                      )}
+                      className="flex min-h-8 w-full items-center gap-2 text-left text-sm"
                     >
-                      {option.label}
+                      <span
+                        className={cn(
+                          "flex h-3.5 w-3.5 shrink-0 items-center justify-center border",
+                          question.selectionMode === "single" ? "rounded-full" : "rounded-[3px]",
+                          selected ? "border-primary bg-primary text-primary-foreground" : "border-input",
+                        )}
+                      >
+                        {selected ? <Check className="h-2.5 w-2.5" /> : null}
+                      </span>
+                      <span className={selected ? "text-foreground" : "text-muted-foreground"}>{option.label}</span>
                     </button>
                   );
                 })}
@@ -1149,7 +1176,7 @@ function Variant10Monochrome() {
   return (
     <div className="divide-y divide-border border-y border-border">
       <div className="py-3.5">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           Questions — {AGENT_NAME}, {CREATED_LABEL}
         </div>
         <div className="mt-1.5 text-sm font-medium text-foreground">{qInteraction.title}</div>
@@ -1195,7 +1222,7 @@ function Variant10Monochrome() {
       </div>
 
       <div className="py-3.5">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           Confirm selection — {AGENT_NAME}, {CREATED_LABEL}
         </div>
         <div className="mt-1.5 text-sm font-medium text-foreground">{cbPayload.prompt}</div>
@@ -1240,6 +1267,126 @@ function Variant10Monochrome() {
 }
 
 // ---------------------------------------------------------------------------
+// Variant 11 — Hybrid (recommended, post PAP-12696 review)
+// V03 shell + V01 body: pending + required interactions auto-expand into a
+// compact card with real controls; resolved (and optional) interactions are a
+// permanent bare one-liner with no card fill. Secondary copy sits behind
+// V05's "Show details" disclosure.
+// ---------------------------------------------------------------------------
+
+function Variant11Hybrid() {
+  const { answers, toggle } = useAnswers();
+  const { checked, toggle: toggleChecked } = useChecked();
+
+  return (
+    <div className="space-y-2">
+      <CollapsedRow
+        icon={CircleHelp}
+        title={qInteraction.title ?? ""}
+        meta={`2 questions · ${AGENT_NAME}`}
+        tone="pending"
+        badge="Needs answers"
+        defaultOpen
+      >
+        <div className="space-y-3">
+          {qPayload.questions.map((question) => (
+            <div key={question.id}>
+              <div className="text-sm font-medium text-foreground">{question.prompt}</div>
+              <div className="mt-1.5 flex flex-col gap-1">
+                {(question.options ?? []).map((option) => {
+                  const selected = (answers[question.id] ?? []).includes(option.id);
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => toggle(question.id, option.id, question.selectionMode)}
+                      className={cn(
+                        "flex items-center gap-2 rounded-sm border px-2.5 py-2 text-left text-sm transition-colors",
+                        selected
+                          ? "border-primary/50 bg-primary/5 text-foreground"
+                          : "border-border/60 text-muted-foreground hover:bg-accent/50",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "flex h-3.5 w-3.5 shrink-0 items-center justify-center border",
+                          question.selectionMode === "single" ? "rounded-full" : "rounded-[3px]",
+                          selected ? "border-primary bg-primary text-primary-foreground" : "border-input",
+                        )}
+                      >
+                        {selected ? <Check className="h-2.5 w-2.5" /> : null}
+                      </span>
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          <DetailsDisclosure text={`${qInteraction.summary ?? ""} ${qPayload.questions[0]?.helpText ?? ""}`} />
+          <div className="flex justify-end gap-2">
+            <Button size="xs" variant="ghost">
+              Dismiss
+            </Button>
+            <Button size="xs">{qPayload.submitLabel ?? "Send answers"}</Button>
+          </div>
+        </div>
+      </CollapsedRow>
+
+      <CollapsedRow
+        icon={SquareCheck}
+        title={cbInteraction.title ?? ""}
+        meta={`${cbOptions.length} options · ${AGENT_NAME}`}
+        tone="pending"
+        badge="Needs selection"
+        defaultOpen
+      >
+        <div className="flex flex-col gap-1">
+          {cbOptions.map((option) => (
+            <label
+              key={option.id}
+              className="flex cursor-pointer items-start gap-2 rounded-sm px-1 py-1.5 text-sm text-foreground hover:bg-accent/50"
+            >
+              <Checkbox
+                className="mt-0.5"
+                checked={checked.has(option.id)}
+                onCheckedChange={() => toggleChecked(option.id)}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{option.label}</span>
+                {option.description ? (
+                  <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{option.description}</span>
+                ) : null}
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="mt-2">
+          <DetailsDisclosure text={cbPayload.detailsMarkdown ?? ""} />
+        </div>
+        <div className="mt-2.5 flex items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">{checked.size} selected</span>
+          <div className="flex gap-2">
+            <Button size="xs" variant="ghost">
+              {cbPayload.rejectLabel ?? "Request changes"}
+            </Button>
+            <Button size="xs">{cbPayload.acceptLabel ?? "Confirm"}</Button>
+          </div>
+        </div>
+      </CollapsedRow>
+
+      <div className="flex min-h-10 items-center gap-2 px-3 py-2">
+        <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{doneInteraction.title}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          Approved by {RESOLVER_NAME} · {RESOLVED_LABEL}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Story plumbing
 // ---------------------------------------------------------------------------
 
@@ -1252,7 +1399,7 @@ const variants: Array<{
   {
     index: 1,
     name: "Compact card",
-    thesis: "Keep card identity; cut padding, type scale, badges. Resolved is a single line inside card chrome.",
+    thesis: "Keep card identity; cut padding, type scale, badges. Resolved is a bare one-liner with no card chrome.",
     render: () => <Variant01Compact />,
   },
   {
@@ -1264,13 +1411,15 @@ const variants: Array<{
   {
     index: 3,
     name: "Collapsed by default",
-    thesis: "One-line rows that expand to act; resolved rows are permanently one line. (First row shown expanded.)",
-    render: () => <Variant03Collapsed expandFirst />,
+    thesis:
+      "Semantic folding: pending + required rows auto-expand, resolved rows are permanently one line. Collapsed pending rows keep a needs-you badge.",
+    render: () => <Variant03Collapsed />,
   },
   {
     index: 4,
     name: "Chat-native",
-    thesis: "Interactions are agent message bubbles with inline options and an action row; resolved is a reply chip.",
+    thesis:
+      "Interactions are agent message bubbles with real single/multi controls and an action row; resolved is a reply chip.",
     render: () => <Variant04ChatNative />,
   },
   {
@@ -1308,6 +1457,13 @@ const variants: Array<{
     name: "Minimal monochrome",
     thesis: "No icons, badges, or status color. Typography-only hierarchy with mono checkmarks.",
     render: () => <Variant10Monochrome />,
+  },
+  {
+    index: 11,
+    name: "Hybrid — V03 shell + V01 body (recommended)",
+    thesis:
+      "Post-review favorite: pending + required = V01's compact expanded card inside V03's row shell; resolved & optional = permanent bare one-liner, no card fill. Details behind V05's disclosure.",
+    render: () => <Variant11Hybrid />,
   },
 ];
 
@@ -1356,10 +1512,11 @@ export const AllVariants: Story = {
       <section className="paperclip-story__frame overflow-hidden">
         <div className="border-b border-border px-5 py-4">
           <div className="paperclip-story__label">PAP-12679 · Redesign lab</div>
-          <h2 className="mt-1 text-xl font-semibold">Interaction redesign lab — all 10 variants</h2>
+          <h2 className="mt-1 text-xl font-semibold">Interaction redesign lab — 10 variants + recommended hybrid</h2>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             Every variant renders the identical fixture trio: pending questions, pending checkbox confirmation,
             resolved plan approval. Compare vertical cost, scannability, and how quiet the resolved state gets.
+            Variant 11 is the post-review (PAP-12696) recommendation: V03 shell + V01 body.
           </p>
         </div>
         <div className="space-y-10 p-5">
@@ -1408,3 +1565,25 @@ export const V09SplitSurfaceDialogOpen: Story = {
   ),
 };
 export const V10MinimalMonochrome: Story = { render: () => <VariantPage index={10} /> };
+export const V11HybridRecommended: Story = { render: () => <VariantPage index={11} /> };
+export const V03CollapsedPendingFolded: Story = {
+  render: () => (
+    <StoryFrame>
+      <section className="paperclip-story__frame overflow-hidden">
+        <div className="border-b border-border px-5 py-4">
+          <div className="paperclip-story__label">Redesign lab · Variant 03</div>
+          <h2 className="mt-1 text-xl font-semibold">Collapsed by default — pending rows folded</h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            The scan state: folded pending rows keep the yellow icon plus a needs-you badge so required decisions
+            stay discoverable without expansion.
+          </p>
+        </div>
+        <div className="p-5">
+          <ThreadScaffold>
+            <Variant03Collapsed collapsePending />
+          </ThreadScaffold>
+        </div>
+      </section>
+    </StoryFrame>
+  ),
+};
