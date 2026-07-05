@@ -370,6 +370,7 @@ function CollapsedRow({
   meta,
   tone,
   badge,
+  badgeTone = "pending",
   defaultOpen,
   children,
 }: {
@@ -378,6 +379,7 @@ function CollapsedRow({
   meta: string;
   tone: "pending" | "done";
   badge?: string;
+  badgeTone?: "pending" | "done";
   defaultOpen?: boolean;
   children?: React.ReactNode;
 }) {
@@ -402,7 +404,14 @@ function CollapsedRow({
       />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{title}</span>
       {badge ? (
-        <span className="shrink-0 rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] font-medium text-yellow-600 dark:text-yellow-400">
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
+            badgeTone === "pending"
+              ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400"
+              : "bg-green-500/10 text-green-600 dark:text-green-400",
+          )}
+        >
           {badge}
         </span>
       ) : null}
@@ -428,16 +437,13 @@ function CollapsedRow({
   );
 }
 
-function Variant03Collapsed({ collapsePending }: { collapsePending?: boolean }) {
+function Variant03PendingRows({ open }: { open: boolean }) {
   const { answers, toggle } = useAnswers();
   const { checked, toggle: toggleChecked } = useChecked();
-
-  // Semantic default-open: pending + required interactions auto-expand;
-  // resolved (and optional) rows stay permanently collapsed.
-  const pendingOpen = !collapsePending;
+  const pendingOpen = open;
 
   return (
-    <div className="space-y-2">
+    <>
       <CollapsedRow
         icon={CircleHelp}
         title={qInteraction.title ?? ""}
@@ -508,7 +514,16 @@ function Variant03Collapsed({ collapsePending }: { collapsePending?: boolean }) 
           <Button size="xs">{cbPayload.acceptLabel ?? "Confirm"}</Button>
         </div>
       </CollapsedRow>
+    </>
+  );
+}
 
+function Variant03Collapsed({ collapsePending }: { collapsePending?: boolean }) {
+  // Semantic default-open: pending + required interactions auto-expand;
+  // resolved (and optional) rows stay permanently collapsed.
+  return (
+    <div className="space-y-2">
+      <Variant03PendingRows open={!collapsePending} />
       <CollapsedRow
         icon={ListChecks}
         title={`${doneInteraction.title} — approved`}
@@ -1387,6 +1402,42 @@ function Variant11Hybrid() {
 }
 
 // ---------------------------------------------------------------------------
+// Variant 12 — V03 styles, everything toggled open (Dotta's direction)
+// Exactly the Variant 03 look, but every row — including the resolved one —
+// keeps a chevron toggle and defaults to expanded. Resolved signal moves from
+// the leading check into a green "Approved" badge; the expanded resolved body
+// shows the original prompt plus the outcome line.
+// ---------------------------------------------------------------------------
+
+function Variant12ExpandedByDefault() {
+  return (
+    <div className="space-y-2">
+      <Variant03PendingRows open />
+      <CollapsedRow
+        icon={ListChecks}
+        title={doneInteraction.title ?? ""}
+        meta={`${RESOLVER_NAME} · ${RESOLVED_LABEL}`}
+        tone="done"
+        badge="Approved"
+        badgeTone="done"
+        defaultOpen
+      >
+        <div className="space-y-1.5">
+          <p className="text-sm text-muted-foreground">{doneInteraction.payload.prompt}</p>
+          <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+            <span>
+              <span className="font-medium text-foreground">Plan approved</span> — {RESOLVER_NAME}, {RESOLVED_LABEL} ·
+              plan revision 4
+            </span>
+          </p>
+        </div>
+      </CollapsedRow>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Story plumbing
 // ---------------------------------------------------------------------------
 
@@ -1465,6 +1516,13 @@ const variants: Array<{
       "Post-review favorite: pending + required = V01's compact expanded card inside V03's row shell; resolved & optional = permanent bare one-liner, no card fill. Details behind V05's disclosure.",
     render: () => <Variant11Hybrid />,
   },
+  {
+    index: 12,
+    name: "V03 styles, expanded by default (Dotta's pick)",
+    thesis:
+      "Variant 03's exact styling, but every row — including resolved — keeps its chevron toggle and defaults to expanded. Resolved signal moves to a green Approved badge; the open resolved body shows the prompt and outcome.",
+    render: () => <Variant12ExpandedByDefault />,
+  },
 ];
 
 function StoryFrame({ children }: { children: React.ReactNode }) {
@@ -1512,11 +1570,12 @@ export const AllVariants: Story = {
       <section className="paperclip-story__frame overflow-hidden">
         <div className="border-b border-border px-5 py-4">
           <div className="paperclip-story__label">PAP-12679 · Redesign lab</div>
-          <h2 className="mt-1 text-xl font-semibold">Interaction redesign lab — 10 variants + recommended hybrid</h2>
+          <h2 className="mt-1 text-xl font-semibold">Interaction redesign lab — 10 variants + hybrid + Dotta's pick</h2>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             Every variant renders the identical fixture trio: pending questions, pending checkbox confirmation,
             resolved plan approval. Compare vertical cost, scannability, and how quiet the resolved state gets.
-            Variant 11 is the post-review (PAP-12696) recommendation: V03 shell + V01 body.
+            Variant 11 is the post-review (PAP-12696) recommendation; Variant 12 is Dotta&apos;s direction: V03
+            styles with every toggle present and expanded by default.
           </p>
         </div>
         <div className="space-y-10 p-5">
@@ -1566,6 +1625,7 @@ export const V09SplitSurfaceDialogOpen: Story = {
 };
 export const V10MinimalMonochrome: Story = { render: () => <VariantPage index={10} /> };
 export const V11HybridRecommended: Story = { render: () => <VariantPage index={11} /> };
+export const V12ExpandedByDefault: Story = { render: () => <VariantPage index={12} /> };
 export const V03CollapsedPendingFolded: Story = {
   render: () => (
     <StoryFrame>
