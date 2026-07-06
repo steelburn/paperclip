@@ -5,6 +5,8 @@ import type { IssueWorkProduct } from "@paperclipai/shared";
 
 type IssueWorkProductRow = typeof issueWorkProducts.$inferSelect;
 
+const EXECUTION_WORKSPACE_WORK_PRODUCTS_LIMIT = 200;
+
 function toIssueWorkProduct(row: IssueWorkProductRow): IssueWorkProduct {
   return {
     id: row.id,
@@ -52,7 +54,8 @@ export function workProductService(db: Db) {
             eq(issueWorkProducts.executionWorkspaceId, executionWorkspaceId),
           ),
         )
-        .orderBy(desc(issueWorkProducts.isPrimary), desc(issueWorkProducts.updatedAt));
+        .orderBy(desc(issueWorkProducts.isPrimary), desc(issueWorkProducts.updatedAt))
+        .limit(EXECUTION_WORKSPACE_WORK_PRODUCTS_LIMIT);
       return rows.map(toIssueWorkProduct);
     },
 

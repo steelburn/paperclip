@@ -111,7 +111,6 @@ function githubPullRequestIdentity(url: string): { externalId: string; title: st
   } catch {
     return null;
   }
-  return null;
 }
 
 function shortSha(value: string) {
