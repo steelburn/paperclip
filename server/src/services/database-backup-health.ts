@@ -93,7 +93,10 @@ async function findLatestBackup(backupDir: string, nowMs: number) {
       if (isMissingFileError(error)) continue;
       throw error;
     }
-    // Zero-byte archives are failed/partial dumps, not restorable backups.
+    // The backup writer streams to `<name>.sql.gz.partial` and renames on
+    // success, so `.sql.gz` files are complete by convention (the extension
+    // filter above excludes in-progress/crashed partials). Zero-byte archives
+    // from older writers are still skipped as failed dumps.
     if (fileStat.size === 0) continue;
     if (!latest || fileStat.mtimeMs > latest.mtimeMs) {
       latest = { fullPath, mtimeMs: fileStat.mtimeMs, size: fileStat.size };

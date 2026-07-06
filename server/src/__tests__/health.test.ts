@@ -166,7 +166,7 @@ describe("GET /health", () => {
     expect(res.body.warnings).toEqual(res.body.databaseBackup.warnings);
   });
 
-  it("ignores zero-byte backup archives when picking the latest backup", async () => {
+  it("ignores zero-byte and in-progress .partial archives when picking the latest backup", async () => {
     const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-health-backups-"));
     const goodBackup = path.join(backupDir, "paperclip-20260705-031702.sql.gz");
     fs.writeFileSync(goodBackup, "backup");
@@ -182,6 +182,8 @@ describe("GET /health", () => {
       new Date("2026-07-06T12:00:00.000Z"),
       new Date("2026-07-06T12:00:00.000Z"),
     );
+    const partialBackup = path.join(backupDir, "paperclip-20260706-123000.sql.gz.partial");
+    fs.writeFileSync(partialBackup, "in-progress dump");
     const app = createApp(createHealthyDb(), testServerInfo, {
       enabled: true,
       backupDir,
