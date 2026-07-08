@@ -9,6 +9,31 @@ ALTER TABLE "pipeline_case_issue_links" ADD COLUMN IF NOT EXISTS "retired_by_att
 ALTER TABLE "pipeline_case_issue_links" ADD COLUMN IF NOT EXISTS "retired_reason" text;--> statement-breakpoint
 ALTER TABLE "pipeline_automation_executions" ADD COLUMN IF NOT EXISTS "retry_of_execution_id" uuid;--> statement-breakpoint
 ALTER TABLE "pipeline_automation_executions" ADD COLUMN IF NOT EXISTS "generation" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "type" text;--> statement-breakpoint
+UPDATE "pipeline_case_events"
+SET "type" = 'updated'
+WHERE "type" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ALTER COLUMN "type" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "actor_type" text;--> statement-breakpoint
+UPDATE "pipeline_case_events"
+SET "actor_type" = 'system'
+WHERE "actor_type" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ALTER COLUMN "actor_type" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "actor_user_id" text;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "actor_agent_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "run_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "from_stage_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "to_stage_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "payload" jsonb DEFAULT '{}'::jsonb;--> statement-breakpoint
+UPDATE "pipeline_case_events"
+SET "payload" = '{}'::jsonb
+WHERE "payload" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ALTER COLUMN "payload" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "created_at" timestamp with time zone DEFAULT now();--> statement-breakpoint
+UPDATE "pipeline_case_events"
+SET "created_at" = now()
+WHERE "created_at" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ALTER COLUMN "created_at" SET NOT NULL;--> statement-breakpoint
 DROP INDEX IF EXISTS "pipeline_cases_parent_request_key_uq";--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "pipeline_cases_parent_request_key_uq" ON "pipeline_cases" USING btree ("parent_case_id","request_key") WHERE "pipeline_cases"."request_key" is not null and "pipeline_cases"."retired_at" is null;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "pipeline_cases_automation_attempt_idx" ON "pipeline_cases" USING btree ("automation_attempt_id");--> statement-breakpoint

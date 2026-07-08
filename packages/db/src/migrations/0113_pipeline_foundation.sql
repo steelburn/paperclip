@@ -150,6 +150,111 @@ CREATE TABLE IF NOT EXISTS "pipelines" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "pipelines" ADD COLUMN IF NOT EXISTS "company_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipelines" ALTER COLUMN "company_id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipelines" ADD COLUMN IF NOT EXISTS "project_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipelines" ADD COLUMN IF NOT EXISTS "key" text;--> statement-breakpoint
+UPDATE "pipelines"
+SET "key" = "id"::text
+WHERE "key" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipelines" ALTER COLUMN "key" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_cases" ADD COLUMN IF NOT EXISTS "company_id" uuid;--> statement-breakpoint
+UPDATE "pipeline_cases"
+SET "company_id" = "pipelines"."company_id"
+FROM "pipelines"
+WHERE "pipeline_cases"."pipeline_id" = "pipelines"."id"
+  AND "pipeline_cases"."company_id" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_cases" ALTER COLUMN "company_id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_cases" ADD COLUMN IF NOT EXISTS "case_key" text;--> statement-breakpoint
+UPDATE "pipeline_cases"
+SET "case_key" = "id"::text
+WHERE "case_key" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_cases" ALTER COLUMN "case_key" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_cases" ADD COLUMN IF NOT EXISTS "parent_case_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_cases" ADD COLUMN IF NOT EXISTS "lease_expires_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "pipeline_automation_executions" ADD COLUMN IF NOT EXISTS "company_id" uuid;--> statement-breakpoint
+UPDATE "pipeline_automation_executions"
+SET "company_id" = "pipeline_cases"."company_id"
+FROM "pipeline_cases"
+WHERE "pipeline_automation_executions"."case_id" = "pipeline_cases"."id"
+  AND "pipeline_automation_executions"."company_id" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_automation_executions" ALTER COLUMN "company_id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_blockers" ADD COLUMN IF NOT EXISTS "company_id" uuid;--> statement-breakpoint
+UPDATE "pipeline_case_blockers"
+SET "company_id" = "pipeline_cases"."company_id"
+FROM "pipeline_cases"
+WHERE "pipeline_case_blockers"."case_id" = "pipeline_cases"."id"
+  AND "pipeline_case_blockers"."company_id" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_blockers" ALTER COLUMN "company_id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "company_id" uuid;--> statement-breakpoint
+UPDATE "pipeline_case_events"
+SET "company_id" = "pipeline_cases"."company_id"
+FROM "pipeline_cases"
+WHERE "pipeline_case_events"."case_id" = "pipeline_cases"."id"
+  AND "pipeline_case_events"."company_id" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ALTER COLUMN "company_id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_issue_links" ADD COLUMN IF NOT EXISTS "company_id" uuid;--> statement-breakpoint
+UPDATE "pipeline_case_issue_links"
+SET "company_id" = "pipeline_cases"."company_id"
+FROM "pipeline_cases"
+WHERE "pipeline_case_issue_links"."case_id" = "pipeline_cases"."id"
+  AND "pipeline_case_issue_links"."company_id" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_issue_links" ALTER COLUMN "company_id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_documents" ADD COLUMN IF NOT EXISTS "company_id" uuid;--> statement-breakpoint
+UPDATE "pipeline_documents"
+SET "company_id" = "pipelines"."company_id"
+FROM "pipelines"
+WHERE "pipeline_documents"."pipeline_id" = "pipelines"."id"
+  AND "pipeline_documents"."company_id" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_documents" ALTER COLUMN "company_id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "actor_agent_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "type" text;--> statement-breakpoint
+UPDATE "pipeline_case_events"
+SET "type" = 'updated'
+WHERE "type" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ALTER COLUMN "type" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "actor_type" text;--> statement-breakpoint
+UPDATE "pipeline_case_events"
+SET "actor_type" = 'system'
+WHERE "actor_type" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ALTER COLUMN "actor_type" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "actor_user_id" text;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "run_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "from_stage_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "to_stage_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "payload" jsonb DEFAULT '{}'::jsonb;--> statement-breakpoint
+UPDATE "pipeline_case_events"
+SET "payload" = '{}'::jsonb
+WHERE "payload" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ALTER COLUMN "payload" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ADD COLUMN IF NOT EXISTS "created_at" timestamp with time zone DEFAULT now();--> statement-breakpoint
+UPDATE "pipeline_case_events"
+SET "created_at" = now()
+WHERE "created_at" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_case_events" ALTER COLUMN "created_at" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_cases" ADD COLUMN IF NOT EXISTS "lease_agent_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_cases" ADD COLUMN IF NOT EXISTS "created_by_agent_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipelines" ADD COLUMN IF NOT EXISTS "created_by_agent_id" uuid;--> statement-breakpoint
+ALTER TABLE "pipeline_documents" ADD COLUMN IF NOT EXISTS "key" text;--> statement-breakpoint
+UPDATE "pipeline_documents"
+SET "key" = "id"::text
+WHERE "key" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_documents" ALTER COLUMN "key" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_documents" ADD COLUMN IF NOT EXISTS "updated_at" timestamp with time zone DEFAULT now();--> statement-breakpoint
+UPDATE "pipeline_documents"
+SET "updated_at" = now()
+WHERE "updated_at" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_documents" ALTER COLUMN "updated_at" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_stages" ADD COLUMN IF NOT EXISTS "key" text;--> statement-breakpoint
+UPDATE "pipeline_stages"
+SET "key" = "id"::text
+WHERE "key" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_stages" ALTER COLUMN "key" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_stages" ADD COLUMN IF NOT EXISTS "position" integer DEFAULT 0;--> statement-breakpoint
+UPDATE "pipeline_stages"
+SET "position" = 0
+WHERE "position" IS NULL;--> statement-breakpoint
+ALTER TABLE "pipeline_stages" ALTER COLUMN "position" SET NOT NULL;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "pipeline_automation_executions" ADD CONSTRAINT "pipeline_automation_executions_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
