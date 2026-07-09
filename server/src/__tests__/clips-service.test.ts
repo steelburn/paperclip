@@ -305,6 +305,25 @@ describeEmbeddedPostgres("clipService", () => {
     ]);
   });
 
+  it("does not trust showcase validation state for successful first-run metrics", async () => {
+    const companyId = await seedCompany();
+    const { clip } = await publishFixture(companyId);
+
+    const updated = await svc.createShowcase(clip.slug, {
+      title: "Community run report",
+      validationState: "passed",
+    }, {
+      actorType: "user",
+      actorId: "showcase-user",
+      userId: "showcase-user",
+    });
+
+    expect(updated.showcaseCount).toBe(1);
+    expect(updated.successfulFirstRunCount).toBe(0);
+    const posts = await db.select().from(clipShowcasePosts).where(eq(clipShowcasePosts.clipId, clip.id));
+    expect(posts[0]?.validationState).toBe("passed");
+  });
+
   it("does not serve blocked or failed revisions through public revision reads", async () => {
     const companyId = await seedCompany();
     const { clip } = await publishFixture(companyId);

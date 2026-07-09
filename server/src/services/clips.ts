@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   clipComments,
@@ -44,7 +44,7 @@ type Actor = {
   userId?: string | null;
 };
 
-type ClipRevisionClient = Pick<Db, "insert" | "select">;
+type ClipServiceClient = Pick<Db, "insert" | "select">;
 
 function first<T>(rows: T[]): T | null {
   return rows[0] ?? null;
@@ -125,12 +125,12 @@ function actorColumns(actor: Actor) {
 }
 
 export function clipService(db: Db) {
-  async function getCreatorProfileById(id: string) {
-    return first(await db.select().from(clipCreatorProfiles).where(eq(clipCreatorProfiles.id, id)).limit(1));
+  async function getCreatorProfileById(id: string, client: Pick<Db, "select"> = db) {
+    return first(await client.select().from(clipCreatorProfiles).where(eq(clipCreatorProfiles.id, id)).limit(1));
   }
 
-  async function getCreatorProfileByHandle(handle: string) {
-    return first(await db.select().from(clipCreatorProfiles).where(eq(clipCreatorProfiles.handle, handle)).limit(1));
+  async function getCreatorProfileByHandle(handle: string, client: Pick<Db, "select"> = db) {
+    return first(await client.select().from(clipCreatorProfiles).where(eq(clipCreatorProfiles.handle, handle)).limit(1));
   }
 
   async function getClipById(id: string) {
@@ -245,43 +245,61 @@ export function clipService(db: Db) {
     });
   }
 
+  function creatorProfileInsertValues(companyId: string, input: CreateClipCreatorProfile) {
+    return {
+      companyId,
+      handle: input.handle,
+      displayName: input.displayName,
+      bio: input.bio ?? null,
+      avatarUrl: input.avatarUrl ?? null,
+      websiteUrl: input.websiteUrl ?? null,
+      verificationState: input.verificationState ?? "unverified",
+      reputationSummary: input.reputationSummary ?? {},
+    };
+  }
+
   async function createCreatorProfile(companyId: string, input: CreateClipCreatorProfile) {
     const [profile] = await db
       .insert(clipCreatorProfiles)
-      .values({
-        companyId,
-        handle: input.handle,
-        displayName: input.displayName,
-        bio: input.bio ?? null,
-        avatarUrl: input.avatarUrl ?? null,
-        websiteUrl: input.websiteUrl ?? null,
-        verificationState: input.verificationState ?? "unverified",
-        reputationSummary: input.reputationSummary ?? {},
-      })
+      .values(creatorProfileInsertValues(companyId, input))
       .returning();
     return profile;
   }
 
-  async function resolveCreatorProfile(companyId: string, input: PublishClip) {
+  async function createCreatorProfileForPublish(client: ClipServiceClient, companyId: string, input: CreateClipCreatorProfile) {
+    const [profile] = await client
+      .insert(clipCreatorProfiles)
+      .values(creatorProfileInsertValues(companyId, input))
+      .onConflictDoNothing({ target: clipCreatorProfiles.handle })
+      .returning();
+    if (profile) return profile;
+    const existing = await getCreatorProfileByHandle(input.handle, client);
+    if (!existing || existing.companyId !== companyId) {
+      throw conflict("Creator profile handle already belongs to another company");
+    }
+    return existing;
+  }
+
+  async function resolveCreatorProfile(client: ClipServiceClient, companyId: string, input: PublishClip) {
     if (input.creatorProfileId) {
-      const profile = await getCreatorProfileById(input.creatorProfileId);
+      const profile = await getCreatorProfileById(input.creatorProfileId, client);
       if (!profile || profile.companyId !== companyId) {
         throw unprocessable("Creator profile does not belong to this company");
       }
       return profile;
     }
     if (!input.creatorProfile) throw unprocessable("creatorProfileId or creatorProfile is required");
-    const existing = await getCreatorProfileByHandle(input.creatorProfile.handle);
+    const existing = await getCreatorProfileByHandle(input.creatorProfile.handle, client);
     if (existing) {
       if (existing.companyId !== companyId) {
         throw conflict("Creator profile handle already belongs to another company");
       }
       return existing;
     }
-    return createCreatorProfile(companyId, input.creatorProfile);
+    return createCreatorProfileForPublish(client, companyId, input.creatorProfile);
   }
 
-  async function insertRevision(client: ClipRevisionClient, clipId: string, input: CreateClipRevision, requestedRevisionNumber?: number) {
+  async function insertRevision(client: ClipServiceClient, clipId: string, input: CreateClipRevision, requestedRevisionNumber?: number) {
     const revisionNumber = requestedRevisionNumber ?? await nextRevisionNumber(client, clipId);
     const [revision] = await client
       .insert(clipRevisions)
@@ -335,8 +353,8 @@ export function clipService(db: Db) {
   async function publish(companyId: string, input: PublishClip) {
     const existing = await getClipBySlug(input.slug);
     if (existing) throw conflict("Clip slug already exists");
-    const creatorProfile = await resolveCreatorProfile(companyId, input);
-    const { clip: updated, revision } = await db.transaction(async (tx) => {
+    const { clip: updated, revision, creatorProfile } = await db.transaction(async (tx) => {
+      const creatorProfile = await resolveCreatorProfile(tx, companyId, input);
       const [clip] = await tx
         .insert(clips)
         .values({
@@ -370,7 +388,7 @@ export function clipService(db: Db) {
         })
         .where(eq(clips.id, clip.id))
         .returning();
-      return { clip: updated, revision };
+      return { clip: updated, revision, creatorProfile };
     });
     await rebuildRankingSnapshot(updated);
     return { clip: updated, revision, creatorProfile };
@@ -561,9 +579,6 @@ export function clipService(db: Db) {
       .update(clips)
       .set({
         showcaseCount: sql`${clips.showcaseCount} + 1`,
-        successfulFirstRunCount: input.validationState === "passed"
-          ? sql`${clips.successfulFirstRunCount} + 1`
-          : row.clip.successfulFirstRunCount,
         updatedAt: new Date(),
       })
       .where(eq(clips.id, row.clip.id))
@@ -680,7 +695,7 @@ export function clipService(db: Db) {
       await db
         .select()
         .from(clipCreatorProfiles)
-        .where(ilike(clipCreatorProfiles.handle, handle))
+        .where(eq(clipCreatorProfiles.handle, handle))
         .limit(1),
     );
     if (!profile) return null;
