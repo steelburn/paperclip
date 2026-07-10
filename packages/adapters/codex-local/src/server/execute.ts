@@ -64,7 +64,6 @@ import {
   formatOutputInactivityMonitorErrorMessage,
   resolveCodexInactivityTimeout,
 } from "./output-inactivity-monitor.js";
-import { ACPX_SESSION_CONFIG_FAILED_ERROR_CODE } from "@paperclipai/adapter-utils/acpx-engine/constants";
 import {
   createCodexAcpExecutor,
   formatCodexAcpFallbackMessage,
@@ -331,30 +330,14 @@ export async function ensureCodexSkillsInjected(
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const engineSelection = await resolveCodexExecutionEngineForRun(ctx);
   if (engineSelection.engine === "acp") {
-    let acpResult: AdapterExecutionResult | null = null;
     try {
-      acpResult = await executeCodexAcp(ctx);
+      return await executeCodexAcp(ctx);
     } catch (err) {
       if (engineSelection.explicit) throw err;
       const reason = err instanceof Error ? err.message : String(err);
       await ctx.onLog(
         "stderr",
         formatCodexAcpFallbackMessage(`Codex ACP startup failed: ${reason}`),
-      );
-    }
-    if (acpResult) {
-      // A session/set_config_option rejection (e.g. a manual model id the ACP
-      // server's validation list does not include) is recoverable: the CLI
-      // lane applies model/effort/fast-mode via startup args instead of ACP
-      // session controls. Explicit engine=acp stays strict and fails loudly.
-      const sessionConfigRejected =
-        acpResult.errorCode === ACPX_SESSION_CONFIG_FAILED_ERROR_CODE;
-      if (engineSelection.explicit || !sessionConfigRejected) return acpResult;
-      await ctx.onLog(
-        "stderr",
-        formatCodexAcpFallbackMessage(
-          `Codex ACP rejected session configuration: ${acpResult.errorMessage ?? "unknown error"}`,
-        ),
       );
     }
   }
