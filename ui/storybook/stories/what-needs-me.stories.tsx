@@ -1,10 +1,27 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { CheckCircle2, Inbox } from "lucide-react";
-import type { AttentionItem, AttentionSourceKind, AttentionSeverity } from "@paperclipai/shared";
+import { ArrowUpDown, CheckCircle2, Inbox, Layers, ListFilter } from "lucide-react";
+import type { AttentionItem, AttentionSourceKind, AttentionSeverity, InboxDismissalKind } from "@paperclipai/shared";
 import { AttentionQueueRow } from "@/components/AttentionQueueRow";
+import { IssueGroupHeader } from "@/components/IssueGroupHeader";
+import { Button } from "@/components/ui/button";
+import {
+  groupAttentionItems,
+  sortAttentionItems,
+  type AttentionGroupBy,
+  type AttentionSortOrder,
+} from "@/lib/attention";
 
 const companyId = "company-storybook";
+
+// Base "now" resolved once at module load so date buckets are stable per render.
+const NOW = Date.parse("2026-07-10T12:00:00Z");
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+function dismissal(kind: InboxDismissalKind, snoozedUntil: string | null): AttentionItem["dismissal"] {
+  return { kind, dismissedAt: new Date(NOW - HOUR).toISOString(), snoozedUntil, isActive: true };
+}
 
 function item(
   id: string,
@@ -144,23 +161,98 @@ const POPULATED: AttentionItem[] = [
   ),
 ];
 
-function Queue({ items }: { items: AttentionItem[] }) {
+// Spread activity across recent buckets + attach a couple of projects so the
+// date/project group-by modes have something to show.
+const ACTIVITY_OFFSETS: Record<string, number> = {
+  "recov-1": NOW - 30 * 60 * 1000,
+  "appr-1": NOW - 2 * HOUR,
+  "intx-1": NOW - 26 * HOUR,
+  "review-1": NOW - 27 * HOUR,
+  "join-1": NOW - 3 * DAY,
+  "fail-1": NOW - 5 * DAY,
+  "budget-1": NOW - 40 * DAY,
+};
+const PROJECTS: Record<string, AttentionItem["project"]> = {
+  "appr-1": { id: "proj-alpha", name: "Alpha", urlKey: "alpha" },
+  "intx-1": { id: "proj-alpha", name: "Alpha", urlKey: "alpha" },
+  "review-1": { id: "proj-beta", name: "Beta", urlKey: "beta" },
+};
+const POPULATED_DATED: AttentionItem[] = POPULATED.map((it) => ({
+  ...it,
+  activityAt: new Date(ACTIVITY_OFFSETS[it.id] ?? NOW).toISOString(),
+  project: PROJECTS[it.id] ?? null,
+}));
+
+const SNOOZED: AttentionItem[] = [
+  {
+    ...item("snz-1", "review", "medium", "Design review: settings redesign", "Snoozed until this afternoon."),
+    activityAt: new Date(NOW - 6 * HOUR).toISOString(),
+    dismissal: dismissal("snooze", new Date(NOW + 3 * HOUR).toISOString()),
+  },
+  {
+    ...item("snz-2", "budget_alert", "low", "Budget crossed 70%", "Snoozed until next week.", { inlineResolvable: false }),
+    activityAt: new Date(NOW - 2 * DAY).toISOString(),
+    dismissal: dismissal("snooze", new Date(NOW + 5 * DAY).toISOString()),
+  },
+];
+const DISMISSED: AttentionItem[] = [
+  {
+    ...item("dsm-1", "agent_error_alert", "medium", "Agent error: research analyst", "Dismissed earlier today.", { inlineResolvable: false }),
+    activityAt: new Date(NOW - 8 * HOUR).toISOString(),
+    dismissal: dismissal("dismiss", null),
+  },
+];
+
+function ToolbarButton({ icon: Icon, active }: { icon: typeof Layers; active?: boolean }) {
+  return (
+    <Button type="button" variant="outline" size="icon" className={active ? "h-8 w-8 shrink-0 bg-accent" : "h-8 w-8 shrink-0"}>
+      <Icon className="h-3.5 w-3.5" />
+    </Button>
+  );
+}
+
+function Queue({
+  items,
+  groupBy = "date",
+  sortOrder = "newest",
+  snoozed = [],
+  dismissed = [],
+  openCurtains = false,
+}: {
+  items: AttentionItem[];
+  groupBy?: AttentionGroupBy;
+  sortOrder?: AttentionSortOrder;
+  snoozed?: AttentionItem[];
+  dismissed?: AttentionItem[];
+  openCurtains?: boolean;
+}) {
   const firstInline = items.find((i) => i.inlineResolvable && (i.sourceKind === "approval" || i.sourceKind === "join_request"));
   const [expandedId, setExpandedId] = useState<string | null>(firstInline?.id ?? null);
   const [cleared, setCleared] = useState<Set<string>>(new Set());
   const visible = items.filter((i) => !cleared.has(i.id));
 
+  const groups = useMemo(
+    () => groupAttentionItems(sortAttentionItems(visible, sortOrder), groupBy, { now: NOW }),
+    [visible, groupBy, sortOrder],
+  );
+  const count = visible.length;
+
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-6">
-      <div className="flex items-baseline justify-between">
+    <div className="max-w-3xl space-y-4 p-6">
+      <div className="flex items-center justify-between gap-2">
         <h1 className="text-xl font-bold">What needs me</h1>
-        {visible.length > 0 && (
-          <span className="text-sm text-muted-foreground">
-            {visible.length} {visible.length === 1 ? "decision" : "decisions"}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {count > 0 && (
+            <span className="text-sm text-muted-foreground">
+              {count} {count === 1 ? "decision" : "decisions"}
+            </span>
+          )}
+          <ToolbarButton icon={ListFilter} />
+          <ToolbarButton icon={Layers} active={groupBy !== "date"} />
+          <ToolbarButton icon={ArrowUpDown} />
+        </div>
       </div>
-      {visible.length === 0 ? (
+      {count === 0 && snoozed.length === 0 && dismissed.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-20 text-center">
           <div className="mb-4 rounded-full bg-green-500/10 p-4">
             <CheckCircle2 className="h-10 w-10 text-green-500" />
@@ -172,17 +264,74 @@ function Queue({ items }: { items: AttentionItem[] }) {
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {visible.map((it) => (
-            <AttentionQueueRow
-              key={it.id}
-              item={it}
-              companyId={companyId}
-              expanded={expandedId === it.id}
-              onToggleExpand={() => setExpandedId((p) => (p === it.id ? null : it.id))}
-              onDismiss={(dismissed) => setCleared((prev) => new Set(prev).add(dismissed.id))}
-            />
+        <div className="space-y-4">
+          {groups.map((group) => (
+            <section key={group.key} className="space-y-2">
+              <IssueGroupHeader
+                label={group.label}
+                collapsible
+                collapsed={false}
+                trailing={<span className="text-xs tabular-nums text-muted-foreground">{group.items.length}</span>}
+              />
+              <div className="space-y-2">
+                {group.items.map((it) => (
+                  <AttentionQueueRow
+                    key={it.id}
+                    item={it}
+                    companyId={companyId}
+                    expanded={expandedId === it.id}
+                    onToggleExpand={() => setExpandedId((p) => (p === it.id ? null : it.id))}
+                    onDismiss={(d) => setCleared((prev) => new Set(prev).add(d.id))}
+                    onSnooze={(d) => setCleared((prev) => new Set(prev).add(d.id))}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
+
+          {snoozed.length > 0 && (
+            <section className="space-y-2">
+              <IssueGroupHeader label={`Snoozed (${snoozed.length})`} collapsible collapsed={!openCurtains} className="text-muted-foreground" />
+              {openCurtains && (
+                <div className="space-y-2">
+                  {snoozed.map((it) => (
+                    <AttentionQueueRow
+                      key={it.id}
+                      item={it}
+                      companyId={companyId}
+                      variant="hidden"
+                      expanded={false}
+                      onToggleExpand={() => {}}
+                      onDismiss={() => {}}
+                      onRestore={() => {}}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {dismissed.length > 0 && (
+            <section className="space-y-2">
+              <IssueGroupHeader label={`Dismissed (${dismissed.length})`} collapsible collapsed={!openCurtains} className="text-muted-foreground" />
+              {openCurtains && (
+                <div className="space-y-2">
+                  {dismissed.map((it) => (
+                    <AttentionQueueRow
+                      key={it.id}
+                      item={it}
+                      companyId={companyId}
+                      variant="hidden"
+                      expanded={false}
+                      onToggleExpand={() => {}}
+                      onDismiss={() => {}}
+                      onRestore={() => {}}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
         </div>
       )}
     </div>
@@ -198,8 +347,24 @@ export default meta;
 
 type Story = StoryObj<typeof Queue>;
 
-export const Populated: Story = {
-  args: { items: POPULATED },
+export const DateGrouping: Story = {
+  args: { items: POPULATED_DATED, groupBy: "date" },
+};
+
+export const GroupedByType: Story = {
+  args: { items: POPULATED_DATED, groupBy: "type" },
+};
+
+export const GroupedByProject: Story = {
+  args: { items: POPULATED_DATED, groupBy: "project" },
+};
+
+export const GroupedBySeverity: Story = {
+  args: { items: POPULATED_DATED, groupBy: "severity" },
+};
+
+export const WithCurtains: Story = {
+  args: { items: POPULATED_DATED.slice(0, 3), groupBy: "date", snoozed: SNOOZED, dismissed: DISMISSED, openCurtains: true },
 };
 
 export const ZeroState: Story = {
