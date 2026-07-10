@@ -140,7 +140,7 @@ export function AttentionQueueRow({
         <div
           className={cn(
             "flex min-w-0 flex-1 items-start gap-3 rounded-md",
-            expandable && "cursor-pointer focus-visible:ring-ring focus-visible:ring-[3px] focus-visible:outline-none",
+            expandable && "cursor-pointer focus-visible:ring-ring focus-visible:ring-(length:--rad-3) focus-visible:outline-none",
           )}
           {...(expandable
             ? {
@@ -236,76 +236,78 @@ export function AttentionQueueRow({
               {images.length > 0 && <ThumbnailStack images={images} />}
             </div>
 
-            {/* Inline decision verbs on collapsed inline rows (plan §3). */}
-            {expandable && !expanded && verbs.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {verbs.map((verb) => (
-                  <Button
-                    key={verb.id}
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleExpand();
-                    }}
-                  >
-                    {verb.label}
-                  </Button>
-                ))}
-              </div>
-            )}
           </div>
         </div>
 
         {/* Controls: kept as siblings (not inside the clickable header) so they
             never toggle expand and stay valid interactive targets. */}
-        <div className="flex shrink-0 items-start gap-1">
-          {!inline && href && (
-            <Button asChild variant="outline" size="xs">
-              <Link to={href}>
-                Open
-                <ExternalLink className="h-3 w-3" />
-              </Link>
-            </Button>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {expandable && !expanded && verbs.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-1" aria-label="Decision actions">
+              {verbs.map((verb) => (
+                <Button
+                  key={verb.id}
+                  type="button"
+                  variant={decisionVerbVariant(verb)}
+                  size="xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleExpand();
+                  }}
+                >
+                  {verb.label}
+                </Button>
+              ))}
+            </div>
           )}
 
-          {isHidden ? (
-            onRestore && (
-              <Button type="button" variant="outline" size="xs" onClick={() => onRestore(item)}>
-                <RotateCcw className="h-3 w-3" />
-                Restore
+          <div className="flex items-start justify-end gap-1">
+            {!inline && href && (
+              <Button asChild variant="outline" size="xs">
+                <Link to={href}>
+                  Open
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
               </Button>
-            )
-          ) : (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="text-muted-foreground"
-                  aria-label="Row actions"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
+            )}
+
+            {isHidden ? (
+              onRestore && (
+                <Button type="button" variant="outline" size="xs" onClick={() => onRestore(item)}>
+                  <RotateCcw className="h-3 w-3" />
+                  Restore
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {onSnooze && <SnoozeSubmenu onSnooze={(iso) => onSnooze(item, iso)} />}
-                <DropdownMenuItem onClick={() => onDismiss(item)}>
-                  <X className="h-4 w-4" />
-                  Dismiss
-                </DropdownMenuItem>
-                {href && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
-                      <Link to={href}>Open source</Link>
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+              )
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground"
+                    aria-label="Row actions"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {onSnooze && <SnoozeSubmenu onSnooze={(iso) => onSnooze(item, iso)} />}
+                  <DropdownMenuItem onClick={() => onDismiss(item)}>
+                    <X className="h-4 w-4" />
+                    Dismiss
+                  </DropdownMenuItem>
+                  {href && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild>
+                        <Link to={href}>Open source</Link>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
       </div>
 
@@ -324,6 +326,13 @@ export function AttentionQueueRow({
   );
 }
 
+function decisionVerbVariant(verb: AttentionItem["decisionVerbs"][number]): "default" | "outline" | "destructive" {
+  const text = `${verb.id} ${verb.label}`.toLowerCase();
+  if (/\b(reject|decline|deny|delete|remove)\b/.test(text)) return "destructive";
+  if (/\b(accept|approve|confirm|apply)\b/.test(text)) return "default";
+  return "outline";
+}
+
 /** Small pill used for the project / workspace chips. Clickable when `onClick`. */
 function Chip({
   icon: Icon,
@@ -335,7 +344,7 @@ function Chip({
   onClick?: (e: MouseEvent) => void;
 }) {
   const className = cn(
-    "inline-flex max-w-[12rem] items-center gap-1 rounded-sm border border-border/70 bg-muted/40 px-1.5 py-0.5 text-(length:--text-nano) text-muted-foreground",
+    "inline-flex max-w-(--sz-12rem) items-center gap-1 rounded-sm border border-border/70 bg-muted/40 px-1.5 py-0.5 text-(length:--text-nano) text-muted-foreground",
     onClick && "transition-colors hover:border-border hover:bg-accent hover:text-foreground",
   );
   const content = (
@@ -508,7 +517,7 @@ function ApprovalResolver({ item, companyId }: { item: AttentionItem; companyId:
         value={note}
         onChange={(e) => setNote(e.target.value)}
         placeholder="Optional decision note…"
-        className="min-h-[64px] text-sm"
+        className="min-h-16 text-sm"
       />
       <div className="flex flex-wrap gap-2">
         <Button size="sm" onClick={() => approve.mutate()} disabled={pending}>

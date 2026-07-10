@@ -71,7 +71,7 @@ export function WhatNeedsMe() {
   const { pushToast } = useToastActions();
 
   useEffect(() => {
-    setBreadcrumbs([{ label: "What needs me" }]);
+    setBreadcrumbs([{ label: "Decisions" }]);
   }, [setBreadcrumbs]);
 
   // Re-hydrate per-company preferences when the company changes.
@@ -237,7 +237,7 @@ export function WhatNeedsMe() {
   return (
     <div className="max-w-3xl space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <h1 className="text-xl font-bold">What needs me</h1>
+        <h1 className="text-xl font-bold">Decisions</h1>
         <div className="flex items-center gap-2">
           {visibleCount > 0 && (
             <span className="text-sm text-muted-foreground">
@@ -450,7 +450,7 @@ function FilterMenu({
   const hasActive = countActiveAttentionFilters(filters) > 0;
 
   return (
-    <div className="max-h-[70vh] overflow-y-auto">
+    <div className="max-h-(--sz-70vh) overflow-y-auto">
       <div className="flex items-center justify-between px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Filter</span>
         {hasActive && (

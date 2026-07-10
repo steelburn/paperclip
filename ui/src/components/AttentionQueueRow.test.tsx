@@ -184,8 +184,8 @@ describe("AttentionQueueRow", () => {
     expect(links.some((a) => a.textContent?.includes("Hire agent: Research Analyst"))).toBe(false);
   });
 
-  it("renders inline decision verbs on a collapsed inline row", () => {
-    const el = render(
+  it("renders collapsed inline decision verbs in the right-side action area with semantic variants", () => {
+    render(
       <AttentionQueueRow
         item={buildItem({
           decisionVerbs: [
@@ -199,8 +199,22 @@ describe("AttentionQueueRow", () => {
         onDismiss={noop}
       />,
     );
-    expect(el.textContent).toContain("Approve");
-    expect(el.textContent).toContain("Reject");
+
+    const header = container?.querySelector('[role="button"][aria-expanded]');
+    expect(header?.textContent).not.toContain("Approve");
+    expect(header?.textContent).not.toContain("Reject");
+
+    const decisionActions = container?.querySelector('[aria-label="Decision actions"]');
+    expect(decisionActions?.textContent).toContain("Approve");
+    expect(decisionActions?.textContent).toContain("Reject");
+
+    const buttons = Array.from(decisionActions?.querySelectorAll("button") ?? []);
+    expect(buttons.find((button) => button.textContent === "Approve")?.getAttribute("data-variant")).toBe(
+      "default",
+    );
+    expect(buttons.find((button) => button.textContent === "Reject")?.getAttribute("data-variant")).toBe(
+      "destructive",
+    );
   });
 
   it("does not expose a toggle button for non-inline rows", () => {
