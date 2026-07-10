@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ArrowUpDown, CheckCircle2, Inbox, Layers, ListFilter } from "lucide-react";
 import type { AttentionItem, AttentionSourceKind, AttentionSeverity, InboxDismissalKind } from "@paperclipai/shared";
 import { AttentionQueueRow } from "@/components/AttentionQueueRow";
 import { IssueGroupHeader } from "@/components/IssueGroupHeader";
+import { ToastProvider, useToastActions } from "@/context/ToastContext";
+import { ToastViewport } from "@/components/ToastViewport";
 import { Button } from "@/components/ui/button";
 import {
   groupAttentionItems,
@@ -464,6 +466,35 @@ export const WithCurtains: Story = {
 
 export const TypeColorsAndDetail: Story = {
   args: { items: SHOWCASE, groupBy: "type" },
+};
+
+/** The ~8s undo toast shown after dismissing a row (plan §6). */
+function DismissUndoDemo() {
+  const { pushToast } = useToastActions();
+  useEffect(() => {
+    pushToast({
+      id: "attention-dismiss-demo",
+      title: "Dismissed",
+      body: "Hire agent: Research Analyst",
+      tone: "info",
+      ttlMs: 15000,
+      action: { label: "Undo", onClick: () => {} },
+    });
+  }, [pushToast]);
+  return (
+    <div className="max-w-3xl space-y-4 p-6">
+      <Queue items={SHOWCASE.slice(0, 3)} groupBy="type" />
+    </div>
+  );
+}
+
+export const DismissUndoToast: StoryObj = {
+  render: () => (
+    <ToastProvider>
+      <DismissUndoDemo />
+      <ToastViewport />
+    </ToastProvider>
+  ),
 };
 
 export const ZeroState: Story = {
