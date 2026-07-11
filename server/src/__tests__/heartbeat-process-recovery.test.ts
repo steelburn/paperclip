@@ -1455,17 +1455,16 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
 
   it("sweeps a pre-existing terminal-run finalize barrier exactly once", async () => {
     const fixture = await seedDeadRunFinalizeBarrierFixture({ runStatus: "failed" });
-    const heartbeat = heartbeatService(db);
 
-    const first = await heartbeat.reconcileTerminalRunWorkspaceFinalizes("startup_sweep");
-    const second = await heartbeat.reconcileTerminalRunWorkspaceFinalizes("interval_sweep");
+    const concurrentResults = await Promise.all([
+      heartbeatService(db).reconcileTerminalRunWorkspaceFinalizes("startup_sweep"),
+      heartbeatService(db).reconcileTerminalRunWorkspaceFinalizes("interval_sweep"),
+    ]);
+    const second = await heartbeatService(db).reconcileTerminalRunWorkspaceFinalizes("interval_sweep");
 
-    expect(first).toMatchObject({
-      checked: 1,
-      created: 1,
-      wakesHealed: 1,
-      runIds: [fixture.runId],
-    });
+    expect(concurrentResults.reduce((total, result) => total + result.created, 0)).toBe(1);
+    expect(concurrentResults.reduce((total, result) => total + result.wakesHealed, 0)).toBe(1);
+    expect(concurrentResults.flatMap((result) => result.runIds)).toEqual([fixture.runId]);
     expect(second).toMatchObject({ checked: 1, created: 0, wakesHealed: 0, runIds: [] });
     const syntheticFinalizes = await db
       .select()
@@ -1480,8 +1479,10 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     expect(syntheticFinalizes[0]?.metadata).toMatchObject({
       synthetic: true,
       reason: "process_lost",
-      source: "startup_sweep",
     });
+    expect(["startup_sweep", "interval_sweep"]).toContain(
+      (syntheticFinalizes[0]?.metadata as Record<string, unknown> | null)?.source,
+    );
     await expect(issueService(db).getDependencyReadiness(fixture.dependentIssueId)).resolves.toMatchObject({
       isDependencyReady: true,
       pendingFinalizeBlockerIssueIds: [],

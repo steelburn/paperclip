@@ -5126,6 +5126,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       if (!issue || issue.status !== "done" || !issue.executionWorkspaceId) {
         return { created: false, wakeHealed: 0 };
       }
+      const executionWorkspaceId = issue.executionWorkspaceId;
 
       const latestOperation = await db
         .select({
@@ -5137,7 +5138,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           and(
             eq(workspaceOperations.companyId, run.companyId),
             eq(workspaceOperations.issueId, issue.id),
-            eq(workspaceOperations.executionWorkspaceId, issue.executionWorkspaceId),
+            eq(workspaceOperations.executionWorkspaceId, executionWorkspaceId),
           ),
         )
         .orderBy(
@@ -5155,43 +5156,84 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         return { created: false, wakeHealed: 0 };
       }
 
-      const existingFinalize = await db
-        .select({ id: workspaceOperations.id })
-        .from(workspaceOperations)
-        .where(
-          and(
-            eq(workspaceOperations.companyId, run.companyId),
-            eq(workspaceOperations.heartbeatRunId, run.id),
-            eq(workspaceOperations.phase, "workspace_finalize"),
-          ),
-        )
-        .limit(1)
-        .then((rows) => rows[0] ?? null);
-      if (existingFinalize) return { created: false, wakeHealed: 0 };
-
       const now = new Date();
       const reason = readNonEmptyString(run.errorCode) ?? run.status;
-      await db.insert(workspaceOperations).values({
-        id: randomUUID(),
-        companyId: run.companyId,
-        executionWorkspaceId: issue.executionWorkspaceId,
-        heartbeatRunId: run.id,
-        issueId: issue.id,
-        phase: "workspace_finalize",
-        status: "succeeded",
-        metadata: {
-          synthetic: true,
-          reason,
-          source,
-          outcome: "terminal_without_finalize",
-          terminalRunStatus: run.status,
-          terminalRunErrorCode: run.errorCode ?? null,
-        },
-        startedAt: now,
-        finishedAt: now,
-        createdAt: now,
-        updatedAt: now,
+      const created = await db.transaction(async (tx) => {
+        const lockedRun = await tx
+          .select({ id: heartbeatRuns.id })
+          .from(heartbeatRuns)
+          .where(and(eq(heartbeatRuns.id, run.id), eq(heartbeatRuns.companyId, run.companyId)))
+          .for("update")
+          .limit(1)
+          .then((rows) => rows[0] ?? null);
+        if (!lockedRun) return false;
+
+        const existingFinalize = await tx
+          .select({ id: workspaceOperations.id })
+          .from(workspaceOperations)
+          .where(
+            and(
+              eq(workspaceOperations.companyId, run.companyId),
+              eq(workspaceOperations.heartbeatRunId, run.id),
+              eq(workspaceOperations.phase, "workspace_finalize"),
+            ),
+          )
+          .limit(1)
+          .then((rows) => rows[0] ?? null);
+        if (existingFinalize) return false;
+
+        const lockedLatestOperation = await tx
+          .select({
+            heartbeatRunId: workspaceOperations.heartbeatRunId,
+            phase: workspaceOperations.phase,
+          })
+          .from(workspaceOperations)
+          .where(
+            and(
+              eq(workspaceOperations.companyId, run.companyId),
+              eq(workspaceOperations.issueId, issue.id),
+              eq(workspaceOperations.executionWorkspaceId, executionWorkspaceId),
+            ),
+          )
+          .orderBy(
+            desc(workspaceOperations.startedAt),
+            desc(workspaceOperations.createdAt),
+            desc(workspaceOperations.id),
+          )
+          .limit(1)
+          .then((rows) => rows[0] ?? null);
+        if (
+          !lockedLatestOperation ||
+          lockedLatestOperation.heartbeatRunId !== run.id ||
+          lockedLatestOperation.phase === "workspace_finalize"
+        ) {
+          return false;
+        }
+
+        await tx.insert(workspaceOperations).values({
+          id: randomUUID(),
+          companyId: run.companyId,
+          executionWorkspaceId,
+          heartbeatRunId: run.id,
+          issueId: issue.id,
+          phase: "workspace_finalize",
+          status: "succeeded",
+          metadata: {
+            synthetic: true,
+            reason,
+            source,
+            outcome: "terminal_without_finalize",
+            terminalRunStatus: run.status,
+            terminalRunErrorCode: run.errorCode ?? null,
+          },
+          startedAt: now,
+          finishedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+        return true;
       });
+      if (!created) return { created: false, wakeHealed: 0 };
 
       const wakeResult = await recovery.reconcileResolvedDependencyWakeBackstop({
         runId: run.id,
