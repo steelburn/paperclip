@@ -65,6 +65,7 @@ import {
 import { conflict, HttpError, notFound, unprocessable } from "../errors.js";
 import { logger } from "../middleware/logger.js";
 import { parseObject } from "../adapters/utils.js";
+import { isStrandedIssueRecoveryOriginKind } from "./recovery/origins.js";
 import {
   defaultIssueExecutionWorkspaceSettingsForProject,
   gateProjectExecutionWorkspacePolicy,
@@ -2864,6 +2865,28 @@ function externalWaitFromDescription(description: string | null): { owner: strin
     owner: owner.slice(0, 120),
     action: action.slice(0, 240),
   };
+}
+
+async function hasActiveRecoveryOwnerAction(
+  dbOrTx: Db,
+  companyId: string,
+  issueId: string,
+) {
+  const [activeRecoveryAction] = await dbOrTx
+    .select({ id: issueRecoveryActions.id })
+    .from(issueRecoveryActions)
+    .where(
+      and(
+        eq(issueRecoveryActions.companyId, companyId),
+        inArray(issueRecoveryActions.status, ["active", "escalated"]),
+        or(
+          eq(issueRecoveryActions.sourceIssueId, issueId),
+          eq(issueRecoveryActions.recoveryIssueId, issueId),
+        ),
+      ),
+    )
+    .limit(1);
+  return Boolean(activeRecoveryAction);
 }
 
 function escapeRegExp(value: string) {
@@ -6323,7 +6346,16 @@ export function issueService(db: Db) {
               await listIssueDependencyReadinessMap(dbOrTx, existing.companyId, [id])
             ).get(id)?.unresolvedBlockerIssueIds ?? [];
         const nextDescription = issueData.description !== undefined ? issueData.description : existing.description;
-        if (unresolvedBlockerIssueIds.length === 0 && !externalWaitFromDescription(nextDescription ?? null)) {
+        const nextAssigneeAgentId = patch.assigneeAgentId ?? existing.assigneeAgentId;
+        const hasRecoveryOwnerAction = await hasActiveRecoveryOwnerAction(dbOrTx, existing.companyId, id);
+        const isAssignedRecoveryIssue =
+          isStrandedIssueRecoveryOriginKind(existing.originKind) && Boolean(nextAssigneeAgentId);
+        if (
+          unresolvedBlockerIssueIds.length === 0 &&
+          !externalWaitFromDescription(nextDescription ?? null) &&
+          !hasRecoveryOwnerAction &&
+          !isAssignedRecoveryIssue
+        ) {
           if (existing.status === "blocked" && blockedByIssueIds !== undefined && issueData.status === undefined) {
             patch.status = "todo";
           } else {

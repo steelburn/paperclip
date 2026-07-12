@@ -18,6 +18,7 @@ import {
   issueInboxArchives,
   issueDocuments,
   issuePlanDecompositions,
+  issueRecoveryActions,
   issueRelations,
   issueThreadInteractions,
   issues,
@@ -3454,6 +3455,38 @@ describeEmbeddedPostgres("issueService blockers and dependency wake readiness", 
     });
 
     expect(created.status).toBe("blocked");
+  });
+
+  it("accepts a blocked issue with an active recovery owner/action", async () => {
+    const companyId = randomUUID();
+    const issueId = randomUUID();
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      title: "Recovery-owned issue",
+      status: "todo",
+      priority: "medium",
+    });
+    await db.insert(issueRecoveryActions).values({
+      companyId,
+      sourceIssueId: issueId,
+      kind: "stranded_assigned_issue",
+      status: "active",
+      ownerType: "board",
+      cause: "stranded_assigned_issue",
+      fingerprint: `recovery:${issueId}`,
+      nextAction: "Restore a live execution path or record the manual resolution.",
+    });
+
+    const updated = await svc.update(issueId, { status: "blocked" });
+
+    expect(updated?.status).toBe("blocked");
   });
 
   it("auto-routes a blocked issue to todo when its final blocker edge is deleted", async () => {
