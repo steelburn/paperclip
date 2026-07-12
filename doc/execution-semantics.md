@@ -169,7 +169,25 @@ Use it for:
 
 Blocked issues should stay idle while blockers remain unresolved. Paperclip should not create a queued heartbeat run for that issue until the final blocker is done and the `issue_blockers_resolved` wake can start real work.
 
+Blocker hygiene is a write-time and transition-time contract, not a rendering hint:
+
+- **Write-time:** setting an issue to `blocked` requires at least one unresolved blocker edge or a first-class external owner/action recorded on the issue. A bare `blocked` with neither is invalid — it is an unwakeable parking lot, because no resolution event will ever fire for it.
+- **Transition-time:** ANY transition that leaves a `blocked` issue with zero unresolved blocker edges — the last blocker reaching a terminal state, a blocker edge being deleted, or an edge being stale-cleared — must queue the `issue_blockers_resolved` wake for that issue. The wake keys off the dependent issue's resulting state ("no unresolved edges remain"), not only off blocker-resolution events, so edge deletion and stale-clearing wake the dependent exactly like normal resolution does.
+
+Held against the three coordination invariants: productive work continues (an issue whose edges are cleared wakes instead of going dark), only real blockers stop work (`blocked` cannot exist without a named dependency or external owner/action), and no infinite loops (each edge-clearing transition queues at most one idempotent wake).
+
 If a parent is truly waiting on a child, model that with blockers. Do not rely on the parent/child relationship alone.
+
+### Cross-issue coordination
+
+The run write boundary intentionally scopes a run actor's comments and mutations to its checked-out issue subtree. Coordination across that boundary uses typed, non-executing primitives:
+
+- **Cross-issue report.** A run actor may deliver a typed, auditable, non-executing report — a structured payload carrying origin run/issue provenance — to any issue it can read in the same company. The target assignee's next heartbeat consumes pending reports; an optional idempotent `report_received` wake is governed by target-side policy. Reports are inert data: delivery does not mutate the target issue, change its status, or execute anything on the target's behalf.
+- **Delegated monitor/wake proposal.** A run actor may propose a monitor arm or a typed wake on a readable issue it does not own. The proposal is consumed under the target owner's policy (default: auto-accept from same-tree agents) and is bounded by the existing monitor `timeoutAt`/`maxAttempts` contract — delegation changes who suggested the check, never the bounds that apply to it.
+
+**Relay issues are an anti-pattern.** Creating an issue whose only purpose is to post one comment on, poll, or edge-mutate an issue the author cannot write to burns a full run per message, inflates the tree with non-deliverable coordination work, and adds latency to results that are already verified. When data or a scheduled check needs to cross the write boundary, use a cross-issue report or a delegated monitor/wake proposal instead. The mutation/execution boundary itself does not move: reports and proposals carry information and scheduling intent, not authority.
+
+Held against the three coordination invariants: productive work continues (results and checks reach their owners without a human hop or a relay run); only real blockers stop work (authorization-boundary rejections stop masquerading as blockers while the boundary stays intact); no infinite loops (reports and proposals are idempotent per `(origin issue, target issue, fingerprint)` and wake at most once per fingerprint).
 
 ## 7. Accepted-Plan Decomposition
 
@@ -238,6 +256,17 @@ Every later run that encounters the same accepted-plan fingerprint must consult 
 - If the prior attempt ended after partial child creation, the retry must continue under the same fingerprint and preserve the already-created child ids.
 
 Concurrent accepted-plan runs are therefore idempotent relative to the fingerprint. Creating multiple child trees for the same `(sourceIssueId, acceptedPlanRevisionId)` pair is a product bug.
+
+### Plan shape: terminal gates, not phase funnels
+
+Decomposition shape determines how much of the tree one slow leaf can freeze.
+
+- **Umbrellas block on their terminal gate, not on every phase.** The umbrella issue should carry a blocker edge to its final acceptance gate (the QA sign-off or review rollup issue), not edges to all N phases. Per-phase dependencies belong between the phases themselves; duplicating them onto the umbrella adds edges that delay the umbrella's wake without encoding any additional dependency.
+- **Avoid single-leaf funnels.** A shape where every open issue transitively waits on one leaf means that leaf's internal recovery latency stalls the entire tree, and later-phase owners can neither start nor observe progress. Keep independent phases on independent branches with their own gates so they run and report in parallel; serialize only where a real dependency exists.
+
+Held against the three coordination invariants: productive work continues (independent branches proceed while one leaf recovers); only real blockers stop work (the umbrella and each phase carry only edges that encode true dependencies); no infinite loops (fewer, more truthful edges means fewer resolution wakes, with wake idempotency unchanged).
+
+The same guidance is mirrored in the `paperclip-converting-plans-to-tasks` skill, which is the operational surface planners actually read at decomposition time.
 
 ## 8. Non-Terminal Issue Liveness Contract
 
@@ -447,11 +476,15 @@ Because `serviceName` and `notes` remain visible in issue activity and wake cont
 
 Monitor bounds are enforced. Paperclip rejects attempts to re-arm a monitor whose `timeoutAt` or `maxAttempts` is already exhausted. When a scheduled monitor reaches an exhausted bound at trigger time, Paperclip clears it and follows `recoveryPolicy`: `wake_owner` queues a bounded recovery wake for the assignee, `create_recovery_issue` opens visible issue-backed recovery work, and `escalate_to_board` records a board-visible escalation comment/activity.
 
+A monitor may also be armed through a delegated monitor/wake proposal from a run actor that does not own the issue (see "Cross-issue coordination", section 6). The proposal is consumed under the target owner's policy and counts against the same `timeoutAt`/`maxAttempts` bounds as a self-armed monitor. This replaces the disposable "monitor X" polling-issue chain, which is a relay-issue anti-pattern: the check belongs on the watched issue's own monitor, not on a stream of one-shot checker issues.
+
 Use `blocked` instead of a monitor when no Paperclip assignee owns a responsible polling path. In that case, name the external owner/action or create first-class recovery/blocker work.
 
 ### `blocked`
 
 This is explicit waiting state.
+
+`blocked` with zero unresolved blocker edges and no first-class external owner/action is invalid at write time, and any transition that clears an issue's last unresolved edge must queue the `issue_blockers_resolved` wake (section 6). A blocked issue that reaches zero unresolved edges without waking is a product bug, not a cosmetic gap: nothing else will ever pick it up. The stalled-`blocked` classification below is likewise a contract the product must surface through recovery and visibility paths, not just a documented category.
 
 A healthy `blocked` issue has an explicit waiting path:
 
