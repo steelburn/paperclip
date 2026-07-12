@@ -476,6 +476,16 @@ describeEmbeddedPostgres("task watchdog scheduler", () => {
     const repeatedInteractions = await db.select().from(issueThreadInteractions)
       .where(eq(issueThreadInteractions.issueId, sourceId));
     expect(repeatedInteractions).toHaveLength(1);
+
+    await db.update(issues).set({
+      monitorNextCheckAt: new Date(Date.now() + 60_000),
+      updatedAt: new Date(),
+    }).where(eq(issues.id, sourceId));
+
+    const liveAfterMonitor = await service.reconcileTaskWatchdogs({ companyId });
+
+    expect(liveAfterMonitor).toMatchObject({ checked: 1, live: 1, triggered: 0, escalated: 0 });
+    expect(wakes).toHaveLength(1);
   });
 
   it("keeps terminal acceptance suppressed for an identical fingerprint", async () => {

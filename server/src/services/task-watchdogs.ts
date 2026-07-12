@@ -549,6 +549,10 @@ function taskWatchdogWakeIdempotencyKey(
   return `task_watchdog:${watchdogId}:${stopFingerprint}:${sameFingerprintReviewCount}`;
 }
 
+function isTaskWatchdogEscalationIdempotencyKey(value: string | null | undefined, watchdogId: string) {
+  return value?.startsWith(`task_watchdog_escalation:${watchdogId}:`) === true;
+}
+
 function buildStoppedFingerprintComment(input: {
   sourceIssue: Pick<IssueRow, "identifier" | "id">;
   stopFingerprint: string;
@@ -933,6 +937,7 @@ export function taskWatchdogService(db: Db, deps: TaskWatchdogServiceDeps = {}) 
           issueId: issueThreadInteractions.issueId,
           id: issueThreadInteractions.id,
           status: issueThreadInteractions.status,
+          idempotencyKey: issueThreadInteractions.idempotencyKey,
         })
         .from(issueThreadInteractions)
         .where(and(
@@ -1028,7 +1033,14 @@ export function taskWatchdogService(db: Db, deps: TaskWatchdogServiceDeps = {}) 
         issueId: issueIdFromWakePayload(row.payload),
       })),
       blockers: blockerRows,
-      pendingInteractions: interactionRows,
+      pendingInteractions: interactionRows
+        .filter((row) => !isTaskWatchdogEscalationIdempotencyKey(row.idempotencyKey, watchdog.id))
+        .map((row) => ({
+          companyId: row.companyId,
+          issueId: row.issueId,
+          id: row.id,
+          status: row.status,
+        })),
       pendingApprovals: approvalRows,
       evaluatedAt,
       firstRunGraceMs: TASK_WATCHDOG_FIRST_RUN_GRACE_MS,
@@ -1176,20 +1188,6 @@ export function taskWatchdogService(db: Db, deps: TaskWatchdogServiceDeps = {}) 
         .then((rows) => rows[0] ?? null),
     ]);
     return Boolean(interaction || approval);
-  }
-
-  async function pendingSameFingerprintEscalation(watchdog: IssueWatchdogRow) {
-    return db
-      .select({ id: issueThreadInteractions.id })
-      .from(issueThreadInteractions)
-      .where(and(
-        eq(issueThreadInteractions.companyId, watchdog.companyId),
-        eq(issueThreadInteractions.issueId, watchdog.issueId),
-        eq(issueThreadInteractions.status, "pending"),
-        sql`${issueThreadInteractions.idempotencyKey} like ${`task_watchdog_escalation:${watchdog.id}:%`}`,
-      ))
-      .limit(1)
-      .then((rows) => rows[0] ?? null);
   }
 
   async function markTerminalWatchdogIssueReviewed(watchdog: IssueWatchdogRow, opts: { runId?: string | null } = {}) {
@@ -1394,14 +1392,6 @@ export function taskWatchdogService(db: Db, deps: TaskWatchdogServiceDeps = {}) 
     if (!sourceIssue || sourceIssue.originKind === TASK_WATCHDOG_ORIGIN_KIND) {
       return { state: "skipped" as const, reason: "watched_issue_not_applicable" };
     }
-    const pendingEscalation = await pendingSameFingerprintEscalation(watchdog);
-    if (pendingEscalation) {
-      return {
-        state: "escalated" as const,
-        interactionId: pendingEscalation.id,
-      };
-    }
-
     const input = await collectClassifierInput(watchdog.companyId, watchdog);
     const classification = classifyTaskWatchdogSubtree(input);
     if (classification.state !== "stopped") {
@@ -1505,6 +1495,9 @@ export function taskWatchdogService(db: Db, deps: TaskWatchdogServiceDeps = {}) 
           },
         },
         {},
+        // The escalation card is watchdog metadata; touching the watched issue
+        // would mutate stopped-state fingerprint inputs and cause self re-arms.
+        { touchIssue: false },
       );
       await db
         .update(issueWatchdogs)
