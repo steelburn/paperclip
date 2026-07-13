@@ -4539,6 +4539,9 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
 
     expect(result.orphanBlockersAssigned).toBe(0);
 
+    const repeatResult = await heartbeat.reconcileStrandedAssignedIssues();
+    expect(repeatResult.orphanBlockersAssigned).toBe(0);
+
     const blocker = await db
       .select()
       .from(issues)
@@ -4547,6 +4550,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     expect(blocker?.assigneeAgentId).toBeNull();
 
     const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, blockerIssueId));
+    expect(comments).toHaveLength(1);
     expect(comments[0]?.body).toContain("Board-Owned Blocker");
     expect(comments[0]?.body).toContain("responsibleUserId");
 

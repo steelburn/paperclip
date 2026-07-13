@@ -969,6 +969,18 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       const relations = await issuesSvc.getRelationSummaries(candidate.id);
       const blockingLinks = formatIssueLinksForComment(relations.blocks);
       if (candidate.responsibleUserId != null) {
+        const lastComment = await db
+          .select({ body: issueComments.body })
+          .from(issueComments)
+          .where(eq(issueComments.issueId, candidate.id))
+          .orderBy(desc(issueComments.createdAt), desc(issueComments.id))
+          .limit(1)
+          .then((rows) => rows[0] ?? null);
+        if (lastComment?.body.includes("Board-Owned Blocker")) {
+          skipped += 1;
+          continue;
+        }
+
         await issuesSvc.addComment(
           candidate.id,
           [
