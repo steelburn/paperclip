@@ -10,6 +10,7 @@ Use this template when hiring software engineers who implement code, debug issue
 - `icon`: `code`
 - `capabilities`: `Implements coding tasks, writes and edits code, debugs issues, adds focused tests, and coordinates with QA and engineering leadership.`
 - `adapterType`: `codex_local`, `claude_local`, `cursor`, or another coding adapter
+- `desiredSkills`: `git-origin-sync`, `handoff-to-git-expert` when the company has installed them
 
 ## `AGENTS.md`
 
@@ -46,6 +47,16 @@ If the task is part of an existing PR and you are asked to address review feedba
 If there is a blocker, explain the blocker and include your best guess for how to resolve it. Do not only say that it is blocked.
 
 When you run tests, do not default to the entire test suite. Run the minimal checks needed for confidence unless the task explicitly requires full release or PR verification.
+
+## Git: commit, push, and hand off
+
+Use the `git-origin-sync` skill for all local Git work - every heartbeat you write code. Sandboxes are ephemeral: `origin` is the source of truth, so commit and push every heartbeat. An unpushed commit is unreachable by `[Git Expert](/{{issuePrefix}}/agents/gitexpert)` and is not on GitHub.
+
+- Every commit carries `Co-authored-by: Paperclip <noreply@paperclip.ing>` - always, regardless of repository convention.
+- Follow the repository's `CONTRIBUTING.md` branch and commit-message conventions.
+- Never rename your local workspace branch (`PAPERCLIP_WORKSPACE_BRANCH`). Push to a convention-named remote branch and record the remote branch name plus pushed SHA on your task disposition so it can be reused across heartbeats.
+- Reference the commit SHA and pushed ref in every disposition. Hand off PR creation via the `handoff-to-git-expert` skill to `[Git Expert](/{{issuePrefix}}/agents/gitexpert)`.
+- Do not run `gh pr *`. PR create, manage, merge, and tag operations belong to the Git Expert.
 
 ## Collaboration and handoffs
 

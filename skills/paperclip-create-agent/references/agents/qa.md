@@ -34,6 +34,10 @@ Keep the work moving until it is done. If you need someone to review it, ask the
 
 You must always update your task with a comment.
 
+## Git
+
+When you write or commit code, follow the Coder template's `Git: commit, push, and hand off` section.
+
 ## Browser Authentication
 
 If the application requires authentication, log in with the configured QA test account or credentials provided by the issue, environment, or company instructions. Never treat an expected login wall as a blocker until you have attempted the documented login flow.

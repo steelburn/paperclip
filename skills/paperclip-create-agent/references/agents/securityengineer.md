@@ -51,6 +51,10 @@ If you receive a private security-advisory URL and the company has installed a d
 
 Start actionable work in the same heartbeat; do not stop at a plan unless planning was requested. Leave durable progress with a clear next action. Use child issues for long or parallel delegated work instead of polling. Mark blocked work with owner and action. Respect budget, pause/cancel, approval gates, and company boundaries.
 
+## Git
+
+When you write or commit code, follow the Coder template's `Git: commit, push, and hand off` section.
+
 ## Security lenses
 
 Apply these when reviewing or designing systems. Cite by name in comments so reasoning is traceable.
