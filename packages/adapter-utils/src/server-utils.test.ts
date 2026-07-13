@@ -884,6 +884,32 @@ describe("renderPaperclipWakePrompt", () => {
     expect(prompt).toContain("Replying comment:\nThis is my reply.");
   });
 
+  it("keeps reply fetch guidance when the inline original body budget is exhausted", () => {
+    const issueId = "11111111-1111-4111-8111-111111111111";
+    const replyTargetId = "22222222-2222-4222-8222-222222222222";
+    const prompt = renderPaperclipWakePrompt({
+      reason: "issue_commented",
+      issue: { id: issueId, identifier: "PAP-1581", title: "Handle a direct reply" },
+      commentWindow: { requestedCount: 1, includedCount: 1, missingCount: 0 },
+      comments: [{
+        id: "33333333-3333-4333-8333-333333333333",
+        issueId,
+        body: "This is my reply.",
+        replyToComment: {
+          id: replyTargetId,
+          body: "",
+          bodyTruncated: true,
+          author: { type: "agent", id: "agent-1" },
+        },
+      }],
+      fallbackFetchNeeded: false,
+    });
+
+    expect(prompt).toContain("Treat that earlier comment as the direct subject of this reply.");
+    expect(prompt).toContain(`GET /api/issues/${issueId}/comments/${replyTargetId}`);
+    expect(prompt).toContain("Replying comment:\nThis is my reply.");
+  });
+
   it("renders the execution workspace branch guard only on non-resumed sessions", () => {
     const payload = {
       reason: "issue_assigned",

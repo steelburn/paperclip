@@ -679,6 +679,8 @@ function normalizePaperclipWakeComment(value: unknown): PaperclipWakeComment | n
   const replyToComment = parseObject(comment.replyToComment);
   const replyToAuthor = parseObject(replyToComment.author);
   const replyToBody = asString(replyToComment.body, "");
+  const replyToId = asString(replyToComment.id, "").trim() || null;
+  const replyToBodyTruncated = asBoolean(replyToComment.bodyTruncated, false);
   const body = asString(comment.body, "");
   if (!body.trim()) return null;
   return {
@@ -689,11 +691,11 @@ function normalizePaperclipWakeComment(value: unknown): PaperclipWakeComment | n
     createdAt: asString(comment.createdAt, "").trim() || null,
     authorType: asString(author.type, "").trim() || null,
     authorId: asString(author.id, "").trim() || null,
-    replyToComment: replyToBody.trim()
+    replyToComment: replyToId || replyToBody.trim() || replyToBodyTruncated
       ? {
-          id: asString(replyToComment.id, "").trim() || null,
+          id: replyToId,
           body: replyToBody,
-          bodyTruncated: asBoolean(replyToComment.bodyTruncated, false),
+          bodyTruncated: replyToBodyTruncated,
           createdAt: asString(replyToComment.createdAt, "").trim() || null,
           authorType: asString(replyToAuthor.type, "").trim() || null,
           authorId: asString(replyToAuthor.id, "").trim() || null,
