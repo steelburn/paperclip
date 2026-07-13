@@ -40,13 +40,17 @@ function assessGreptile(checkRuns) {
 }
 
 function fetchCheckRuns(repository, headSha) {
-  const pages = ghJson([
-    "api",
-    "--paginate",
-    "--slurp",
-    `repos/${repository}/commits/${headSha}/check-runs?per_page=100`,
-  ]);
-  return pages.flatMap((page) => page.check_runs ?? []);
+  const runs = [];
+  for (let page = 1; page <= 100; page += 1) {
+    const response = ghJson([
+      "api",
+      `repos/${repository}/commits/${headSha}/check-runs?per_page=100&page=${page}`,
+    ]);
+    const pageRuns = response.check_runs ?? [];
+    runs.push(...pageRuns);
+    if (pageRuns.length < 100) return runs;
+  }
+  throw new Error(`Check-run pagination exceeded 100 pages for ${headSha}`);
 }
 
 export function readinessVerdict({ pullRequest, checks, greptile, behindBy, originatingIssue }) {
