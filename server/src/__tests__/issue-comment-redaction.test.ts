@@ -252,6 +252,69 @@ describeEmbeddedPostgres("deleted issue comment redaction", () => {
     ]);
   });
 
+  it("counts replied-to comment bodies against the aggregate wake payload budget", async () => {
+    const { companyId, issueId } = await seedIssue();
+    const targetCommentIds = [randomUUID(), randomUUID(), randomUUID()];
+    const replyCommentIds = [randomUUID(), randomUUID(), randomUUID()];
+    const targetBody = "o".repeat(4_000);
+    await db.insert(issueComments).values([
+      ...targetCommentIds.map((id, index) => ({
+        id,
+        companyId,
+        issueId,
+        authorUserId: "board-user-1",
+        authorType: "user" as const,
+        body: targetBody,
+        createdAt: new Date(`2026-07-13T00:0${index}:00.000Z`),
+      })),
+      ...replyCommentIds.map((id, index) => ({
+        id,
+        companyId,
+        issueId,
+        authorUserId: "board-user-1",
+        authorType: "user" as const,
+        body: "Reply body",
+        metadata: {
+          version: 1,
+          sections: [],
+          replyTo: {
+            commentId: targetCommentIds[index],
+            authorType: "user" as const,
+            authorAgentId: null,
+            authorUserId: "board-user-1",
+            excerpt: targetBody.slice(0, 200),
+            excerptTruncated: true,
+          },
+        },
+        createdAt: new Date(`2026-07-13T00:1${index}:00.000Z`),
+      })),
+    ]);
+
+    const wakePayload = await buildPaperclipWakePayload({
+      db,
+      companyId,
+      contextSnapshot: {
+        issueId,
+        commentId: replyCommentIds[2],
+        wakeCommentIds: replyCommentIds,
+        wakeReason: "issue_commented",
+      },
+    });
+
+    const comments = wakePayload?.comments ?? [];
+    const totalInlineBodyChars = comments.reduce(
+      (total, comment) => total + String(comment.body ?? "").length + String(comment.replyToComment?.body ?? "").length,
+      0,
+    );
+    expect(totalInlineBodyChars).toBe(12_000);
+    expect(comments[2]?.replyToComment).toMatchObject({
+      id: targetCommentIds[2],
+      body: "o".repeat(3_970),
+      bodyTruncated: true,
+    });
+    expect(wakePayload?.truncated).toBe(true);
+  });
+
   it("stores a server-authored truncated reply snapshot", async () => {
     const { companyId, issueId } = await seedIssue();
     const targetCommentId = randomUUID();

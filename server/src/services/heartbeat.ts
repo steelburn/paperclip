@@ -4218,10 +4218,20 @@ export async function buildPaperclipWakePayload(input: {
     const safeReplyTarget = replyTarget && !input.exposeLowTrustRaw
       ? sanitizeQuarantinedCommentForHigherTrust(replyTarget)
       : replyTarget;
-    const replyToComment = safeReplyTarget &&
+    let replyToComment = null;
+    if (
+      safeReplyTarget &&
       safeReplyTarget.issueId === row.issueId &&
       !safeReplyTarget.deletedAt
-      ? {
+    ) {
+      const allowedReplyBodyChars = Math.min(MAX_INLINE_WAKE_COMMENT_BODY_CHARS, remainingBodyChars);
+      const replyBody = safeReplyTarget.body.length > allowedReplyBodyChars
+        ? safeReplyTarget.body.slice(0, allowedReplyBodyChars)
+        : safeReplyTarget.body;
+      const replyBodyTruncated = replyBody.length < safeReplyTarget.body.length;
+      if (replyBodyTruncated) truncated = true;
+      remainingBodyChars -= replyBody.length;
+      replyToComment = {
           id: safeReplyTarget.id,
           author: safeReplyTarget.authorAgentId
             ? { type: "agent", id: safeReplyTarget.authorAgentId }
@@ -4229,13 +4239,10 @@ export async function buildPaperclipWakePayload(input: {
               ? { type: "user", id: safeReplyTarget.authorUserId }
               : { type: safeReplyTarget.authorType ?? "system", id: null },
           createdAt: safeReplyTarget.createdAt.toISOString(),
-          body: safeReplyTarget.body.length > MAX_INLINE_WAKE_COMMENT_BODY_CHARS
-            ? safeReplyTarget.body.slice(0, MAX_INLINE_WAKE_COMMENT_BODY_CHARS)
-            : safeReplyTarget.body,
-          bodyTruncated: safeReplyTarget.body.length > MAX_INLINE_WAKE_COMMENT_BODY_CHARS,
-        }
-      : null;
-    if (replyToComment?.bodyTruncated) truncated = true;
+          body: replyBody,
+          bodyTruncated: replyBodyTruncated,
+        };
+    }
 
     comments.push({
       id: row.id,
