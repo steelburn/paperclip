@@ -4416,13 +4416,17 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     expect(comments[0]?.body).toContain("Next action:");
   });
 
-  it("assigns open unassigned blockers back to their creator agent", async () => {
+  async function seedUnassignedBlockingIssueFixture(input: {
+    blockerResponsibleUserId: string | null;
+    blockerStatus?: "todo" | "blocked";
+  }) {
     const companyId = randomUUID();
     const creatorAgentId = randomUUID();
     const blockedAssigneeAgentId = randomUUID();
     const blockerIssueId = randomUUID();
     const blockedIssueId = randomUUID();
     const issuePrefix = `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+
     await db.insert(companies).values({
       id: companyId,
       name: "Paperclip",
@@ -4459,10 +4463,10 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
         id: blockerIssueId,
         companyId,
         title: "Fix blocker",
-        status: "todo",
+        status: input.blockerStatus ?? "todo",
         priority: "high",
         createdByAgentId: creatorAgentId,
-        responsibleUserId: "responsible-user",
+        responsibleUserId: input.blockerResponsibleUserId,
         issueNumber: 1,
         identifier: `${issuePrefix}-1`,
       },
@@ -4485,6 +4489,75 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       type: "blocks",
       createdByAgentId: creatorAgentId,
     });
+
+    return {
+      companyId,
+      creatorAgentId,
+      blockerIssueId,
+      blockedIssueId,
+      issuePrefix,
+    };
+  }
+
+  it("leaves board-owned open unassigned blockers for board review", async () => {
+    const { companyId, blockerIssueId, issuePrefix } = await seedUnassignedBlockingIssueFixture({
+      blockerResponsibleUserId: "responsible-user",
+    });
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+
+    expect(result.orphanBlockersAssigned).toBe(0);
+    expect(result.issueIds).not.toContain(blockerIssueId);
+
+    const blocker = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, blockerIssueId))
+      .then((rows) => rows[0] ?? null);
+    expect(blocker?.assigneeAgentId).toBeNull();
+    expect(blocker?.assigneeUserId).toBeNull();
+
+    const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, blockerIssueId));
+    expect(comments).toHaveLength(1);
+    expect(comments[0]?.body).toContain("Board-Owned Blocker");
+    expect(comments[0]?.body).toContain("Awaiting Board Review");
+    expect(comments[0]?.body).toContain(`[${issuePrefix}-2](/${issuePrefix}/issues/${issuePrefix}-2)`);
+
+    const wakeups = await db.select().from(agentWakeupRequests).where(eq(agentWakeupRequests.companyId, companyId));
+    expect(wakeups).toEqual([]);
+  });
+
+  it("does not enqueue agent wakeups for board-owned unassigned blockers", async () => {
+    const { companyId, blockerIssueId } = await seedUnassignedBlockingIssueFixture({
+      blockerResponsibleUserId: "responsible-user",
+      blockerStatus: "blocked",
+    });
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+
+    expect(result.orphanBlockersAssigned).toBe(0);
+
+    const blocker = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, blockerIssueId))
+      .then((rows) => rows[0] ?? null);
+    expect(blocker?.assigneeAgentId).toBeNull();
+
+    const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, blockerIssueId));
+    expect(comments[0]?.body).toContain("Board-Owned Blocker");
+    expect(comments[0]?.body).toContain("responsibleUserId");
+
+    const wakeups = await db.select().from(agentWakeupRequests).where(eq(agentWakeupRequests.companyId, companyId));
+    expect(wakeups).toEqual([]);
+  });
+
+  it("assigns plain open unassigned blockers back to their creator agent", async () => {
+    const { creatorAgentId, blockerIssueId, issuePrefix } = await seedUnassignedBlockingIssueFixture({
+      blockerResponsibleUserId: null,
+    });
     const heartbeat = heartbeatService(db);
 
     const result = await heartbeat.reconcileStrandedAssignedIssues();
@@ -4498,6 +4571,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       .where(eq(issues.id, blockerIssueId))
       .then((rows) => rows[0] ?? null);
     expect(blocker?.assigneeAgentId).toBe(creatorAgentId);
+    expect(blocker?.responsibleUserId).toBeNull();
 
     const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, blockerIssueId));
     expect(comments[0]?.body).toContain("Assigned Orphan Blocker");

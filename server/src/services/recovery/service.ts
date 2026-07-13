@@ -936,6 +936,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         identifier: issues.identifier,
         status: issues.status,
         createdByAgentId: issues.createdByAgentId,
+        responsibleUserId: issues.responsibleUserId,
       })
       .from(issueRelations)
       .innerJoin(issues, eq(issueRelations.issueId, issues.id))
@@ -965,6 +966,26 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       if (seen.has(candidate.id)) continue;
       seen.add(candidate.id);
 
+      const relations = await issuesSvc.getRelationSummaries(candidate.id);
+      const blockingLinks = formatIssueLinksForComment(relations.blocks);
+      if (candidate.responsibleUserId != null) {
+        await issuesSvc.addComment(
+          candidate.id,
+          [
+            "## Board-Owned Blocker - Awaiting Board Review",
+            "",
+            `This issue is blocking ${blockingLinks} but has no agent assignee.`,
+            "",
+            "- It has a `responsibleUserId` set, so it is board/human-owned.",
+            "- It will not be auto-assigned to an agent.",
+            "- Action required: the responsible board owner should resolve or reassign this blocker.",
+          ].join("\n"),
+          {},
+        );
+        skipped += 1;
+        continue;
+      }
+
       const creatorAgentId = candidate.createdByAgentId;
       if (!creatorAgentId) {
         skipped += 1;
@@ -976,8 +997,6 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         continue;
       }
 
-      const relations = await issuesSvc.getRelationSummaries(candidate.id);
-      const blockingLinks = formatIssueLinksForComment(relations.blocks);
       const updated = await issuesSvc.update(candidate.id, {
         assigneeAgentId: creatorAgent.id,
         assigneeUserId: null,
