@@ -8,6 +8,7 @@ import {
   agentRuntimeState,
   agentWakeupRequests,
   budgetPolicies,
+  companyMemberships,
   companySecretBindings,
   companySecrets,
   companySkills,
@@ -422,6 +423,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       await db.delete(documents);
       await db.delete(companySecretBindings);
       await db.delete(companySecrets);
+      await db.delete(companyMemberships);
       try {
         await db.delete(companies);
         break;
@@ -4430,6 +4432,13 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       defaultResponsibleUserId: "responsible-user",
       requireBoardApprovalForNewAgents: false,
     });
+    await db.insert(companyMemberships).values({
+      companyId,
+      principalType: "user",
+      principalId: "responsible-user",
+      status: "active",
+      membershipRole: "owner",
+    });
     await db.insert(agents).values([
       {
         id: creatorAgentId,
@@ -4498,15 +4507,21 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       .where(eq(issues.id, blockerIssueId))
       .then((rows) => rows[0] ?? null);
     expect(blocker?.assigneeAgentId).toBeNull();
+    expect(blocker?.assigneeUserId).toBe("responsible-user");
 
     // A board-attention comment must have been posted instead.
     const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, blockerIssueId));
+    expect(comments).toHaveLength(1);
     expect(comments[0]?.body).toContain("Blocked on Board Review");
     expect(comments[0]?.body).toContain("Board action required");
 
     // No wakeup should have been enqueued for the creator agent.
     const wakeups = await db.select().from(agentWakeupRequests).where(eq(agentWakeupRequests.agentId, creatorAgentId));
     expect(wakeups).toHaveLength(0);
+
+    await heartbeat.reconcileStrandedAssignedIssues();
+    const allComments = await db.select().from(issueComments).where(eq(issueComments.issueId, blockerIssueId));
+    expect(allComments).toHaveLength(1);
   });
 
   it("assigns open unassigned blockers back to their creator agent when no responsibleUserId", async () => {
@@ -4520,8 +4535,15 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       id: companyId,
       name: "Paperclip",
       issuePrefix,
-      defaultResponsibleUserId: null,
+      defaultResponsibleUserId: "responsible-user",
       requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(companyMemberships).values({
+      companyId,
+      principalType: "user",
+      principalId: "responsible-user",
+      status: "active",
+      membershipRole: "owner",
     });
     await db.insert(agents).values([
       {

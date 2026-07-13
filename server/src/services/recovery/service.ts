@@ -985,6 +985,30 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
           ].join("\n"),
           {},
         );
+        const updated = await issuesSvc.update(candidate.id, {
+          assigneeUserId: candidate.responsibleUserId,
+        });
+        if (!updated) {
+          skipped += 1;
+          continue;
+        }
+
+        await logActivity(db, {
+          companyId: candidate.companyId,
+          actorType: "system",
+          actorId: "system",
+          agentId: null,
+          runId: null,
+          action: "issue.updated",
+          entityType: "issue",
+          entityId: candidate.id,
+          details: {
+            identifier: candidate.identifier,
+            assigneeUserId: candidate.responsibleUserId,
+            source: "recovery.reconcile_unassigned_blocking_issue",
+          },
+        });
+
         skipped += 1;
         continue;
       }
