@@ -39,6 +39,16 @@ function assessGreptile(checkRuns) {
   };
 }
 
+function fetchCheckRuns(repository, headSha) {
+  const pages = ghJson([
+    "api",
+    "--paginate",
+    "--slurp",
+    `repos/${repository}/commits/${headSha}/check-runs?per_page=100`,
+  ]);
+  return pages.flatMap((page) => page.check_runs ?? []);
+}
+
 export function readinessVerdict({ pullRequest, checks, greptile, behindBy, originatingIssue }) {
   const reasons = [];
   if (pullRequest.state !== "OPEN") reasons.push(reason("pr_not_open", `PR is ${pullRequest.state.toLowerCase()}`));
@@ -102,16 +112,13 @@ export async function checkReadiness(candidatesDocument, options = {}) {
       "--json",
       "number,url,title,state,isDraft,headRefOid,baseRefName,headRefName,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,updatedAt",
     ]);
-    const checkRunsResponse = ghJson([
-      "api",
-      `repos/${repository}/commits/${pullRequest.headRefOid}/check-runs?per_page=100`,
-    ]);
+    const checkRuns = fetchCheckRuns(repository, pullRequest.headRefOid);
     const comparison = ghJson([
       "api",
       `repos/${repository}/compare/${encodeURIComponent(pullRequest.baseRefName)}...${encodeURIComponent(pullRequest.headRefOid)}`,
     ]);
     const checks = assessChecks(pullRequest.statusCheckRollup ?? []);
-    const greptile = assessGreptile(checkRunsResponse.check_runs ?? []);
+    const greptile = assessGreptile(checkRuns);
     const assessment = readinessVerdict({
       pullRequest,
       checks,

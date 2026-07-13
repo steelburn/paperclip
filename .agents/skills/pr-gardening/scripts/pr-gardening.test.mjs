@@ -7,6 +7,7 @@ import { renderReport } from "./render-report.mjs";
 
 test("extracts only pull requests from the requested repository", () => {
   assert.equal(extractPullRequestNumber("https://github.com/paperclipai/paperclip/pull/9507", "paperclipai/paperclip"), 9507);
+  assert.equal(extractPullRequestNumber("github.com/paperclipai/paperclip/pull/9507", "paperclipai/paperclip"), 9507);
   assert.equal(extractPullRequestNumber("https://github.com/other/repo/pull/9507", "paperclipai/paperclip"), null);
 });
 
@@ -30,7 +31,7 @@ test("origin selection prioritizes work products then comment mentions", () => {
       assigneeAgentId: "agent-1",
       updatedAt: "2026-07-12T12:00:00Z",
       mentions: [{ field: "comment" }],
-      workProducts: [{ type: "pull_request", url: "https://github.com/paperclipai/paperclip/pull/9507" }],
+      workProducts: [{ type: "pull_request", url: "http://github.com/paperclipai/paperclip/pull/9507?source=paperclip#review" }],
     },
   ];
   assert.equal(chooseOriginatingIssue(issues, "https://github.com/paperclipai/paperclip/pull/9507").issueId, "origin");

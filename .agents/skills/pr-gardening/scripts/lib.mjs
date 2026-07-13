@@ -51,10 +51,16 @@ export function prUrl(repository, number) {
   return `https://github.com/${repository}/pull/${number}`;
 }
 
+export function pullRequestIdentity(value) {
+  const match = String(value).match(/(?:https?:\/\/)?github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/i);
+  if (!match) return null;
+  return `${match[1].toLowerCase()}/${match[2].toLowerCase()}#${Number(match[3])}`;
+}
+
 export function extractPullRequestNumber(value, repository) {
-  const escaped = repository.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = String(value).match(new RegExp(`https?://github\\.com/${escaped}/pull/(\\d+)`, "i"));
-  return match ? Number(match[1]) : null;
+  const identity = pullRequestIdentity(value);
+  const prefix = `${repository.toLowerCase()}#`;
+  return identity?.startsWith(prefix) ? Number(identity.slice(prefix.length)) : null;
 }
 
 export async function paperclipGet(path, { apiUrl, apiKey }) {
@@ -80,9 +86,10 @@ export function issueSummary(issue) {
 }
 
 export function chooseOriginatingIssue(sourceIssues, pullRequestUrl) {
+  const targetIdentity = pullRequestIdentity(pullRequestUrl);
   const workProductIssue = sourceIssues.find((issue) =>
     issue.workProducts?.some(
-      (product) => product.type === "pull_request" && product.url?.replace(/\/$/, "") === pullRequestUrl.replace(/\/$/, ""),
+      (product) => product.type === "pull_request" && pullRequestIdentity(product.url) === targetIdentity,
     ),
   );
   if (workProductIssue) return { ...issueSummary(workProductIssue), selectionBasis: "pull_request_work_product" };
