@@ -4145,7 +4145,38 @@ export async function buildPaperclipWakePayload(input: {
             ),
           );
 
+  const replyTargetIds = Array.from(new Set(commentRows.flatMap((comment) => {
+    const metadata = parseObject(comment.metadata);
+    const replyTo = parseObject(metadata.replyTo);
+    const commentId = readNonEmptyString(replyTo.commentId);
+    return commentId ? [commentId] : [];
+  })));
+  const replyTargetRows = replyTargetIds.length === 0
+    ? []
+    : await input.db
+        .select({
+          id: issueComments.id,
+          issueId: issueComments.issueId,
+          body: issueComments.body,
+          authorType: issueComments.authorType,
+          authorAgentId: issueComments.authorAgentId,
+          authorUserId: issueComments.authorUserId,
+          presentation: issueComments.presentation,
+          metadata: issueComments.metadata,
+          deletedAt: issueComments.deletedAt,
+          sourceTrust: issueComments.sourceTrust,
+          createdAt: issueComments.createdAt,
+        })
+        .from(issueComments)
+        .where(
+          and(
+            eq(issueComments.companyId, input.companyId),
+            inArray(issueComments.id, replyTargetIds),
+          ),
+        );
+
   const commentsById = new Map(commentRows.map((comment) => [comment.id, comment]));
+  const replyTargetsById = new Map(replyTargetRows.map((comment) => [comment.id, comment]));
   const comments: Array<Record<string, unknown>> = [];
   let remainingBodyChars = MAX_INLINE_WAKE_COMMENT_BODY_TOTAL_CHARS;
   let truncated = false;
@@ -4181,6 +4212,31 @@ export async function buildPaperclipWakePayload(input: {
     if (bodyTruncated) truncated = true;
     remainingBodyChars -= body.length;
 
+    const metadata = deletedAt ? null : safeRow.metadata ?? null;
+    const replyToCommentId = readNonEmptyString(parseObject(parseObject(metadata).replyTo).commentId);
+    const replyTarget = replyToCommentId ? replyTargetsById.get(replyToCommentId) : null;
+    const safeReplyTarget = replyTarget && !input.exposeLowTrustRaw
+      ? sanitizeQuarantinedCommentForHigherTrust(replyTarget)
+      : replyTarget;
+    const replyToComment = safeReplyTarget &&
+      safeReplyTarget.issueId === row.issueId &&
+      !safeReplyTarget.deletedAt
+      ? {
+          id: safeReplyTarget.id,
+          author: safeReplyTarget.authorAgentId
+            ? { type: "agent", id: safeReplyTarget.authorAgentId }
+            : safeReplyTarget.authorUserId
+              ? { type: "user", id: safeReplyTarget.authorUserId }
+              : { type: safeReplyTarget.authorType ?? "system", id: null },
+          createdAt: safeReplyTarget.createdAt.toISOString(),
+          body: safeReplyTarget.body.length > MAX_INLINE_WAKE_COMMENT_BODY_CHARS
+            ? safeReplyTarget.body.slice(0, MAX_INLINE_WAKE_COMMENT_BODY_CHARS)
+            : safeReplyTarget.body,
+          bodyTruncated: safeReplyTarget.body.length > MAX_INLINE_WAKE_COMMENT_BODY_CHARS,
+        }
+      : null;
+    if (replyToComment?.bodyTruncated) truncated = true;
+
     comments.push({
       id: row.id,
       issueId: row.issueId,
@@ -4188,7 +4244,7 @@ export async function buildPaperclipWakePayload(input: {
       body,
       bodyTruncated,
       presentation: deletedAt ? null : safeRow.presentation ?? null,
-      metadata: deletedAt ? null : safeRow.metadata ?? null,
+      metadata,
       deletedAt: deletedAt ? deletedAt.toISOString() : null,
       deletedByType: deletedAt ? row.deletedByType ?? null : null,
       deletedByAgentId: deletedAt ? row.deletedByAgentId ?? null : null,
@@ -4201,6 +4257,7 @@ export async function buildPaperclipWakePayload(input: {
         : row.authorUserId
           ? { type: "user", id: row.authorUserId }
           : { type: "system", id: null },
+      ...(replyToComment ? { replyToComment } : {}),
     });
   }
 

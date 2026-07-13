@@ -792,6 +792,46 @@ describe("agent issue mutation checkout ownership", () => {
     expect(mockIssueService.update).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["missing", null],
+    ["cross-issue", {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      issueId: "99999999-9999-4999-8999-999999999999",
+      companyId,
+      body: "Other issue body",
+      authorType: "user",
+      authorAgentId: null,
+      authorUserId: "other-user",
+      deletedAt: null,
+    }],
+    ["deleted", {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      issueId,
+      companyId,
+      body: "Deleted body",
+      authorType: "user",
+      authorAgentId: null,
+      authorUserId: "board-user",
+      deletedAt: new Date("2026-07-13T00:00:00.000Z"),
+    }],
+  ])("rejects a %s reply target with 422", async (_case, replyTarget) => {
+    mockIssueService.getComment.mockResolvedValueOnce(replyTarget);
+
+    const res = await request(await createApp(boardActor()))
+      .post(`/api/issues/${issueId}/comments`)
+      .send({
+        body: "Reply body",
+        metadata: {
+          replyTo: {
+            commentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          },
+        },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(mockIssueService.addComment).not.toHaveBeenCalled();
+  });
+
   it("rejects non-mentioned peer agents from posting comments", async () => {
     mockAccessService.decide.mockImplementation(async (input: { action: string }) => ({
       allowed: input.action === "issue:read",

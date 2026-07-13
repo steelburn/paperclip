@@ -4,6 +4,7 @@ import request from "supertest";
 import { sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  activityLog,
   companies,
   companyMemberships,
   createDb,
@@ -45,6 +46,7 @@ describeEmbeddedPostgres("deleted issue comment redaction", () => {
 
   afterEach(async () => {
     await db.delete(issueReferenceMentions);
+    await db.delete(activityLog);
     await db.delete(issueComments);
     await db.delete(issues);
     await db.delete(companyMemberships);
@@ -185,6 +187,108 @@ describeEmbeddedPostgres("deleted issue comment redaction", () => {
     ]);
     expect(JSON.stringify(wakePayload)).not.toContain("secret deleted body");
     expect(JSON.stringify(wakePayload)).not.toContain("secret metadata");
+  });
+
+  it("injects the canonical replied-to comment into wake payloads", async () => {
+    const { companyId, issueId } = await seedIssue();
+    const targetCommentId = randomUUID();
+    const replyCommentId = randomUUID();
+    const targetBody = "o".repeat(4_005);
+    await db.insert(issueComments).values([
+      {
+        id: targetCommentId,
+        companyId,
+        issueId,
+        authorUserId: "board-user-1",
+        authorType: "user",
+        body: targetBody,
+        createdAt: new Date("2026-07-13T00:00:00.000Z"),
+      },
+      {
+        id: replyCommentId,
+        companyId,
+        issueId,
+        authorUserId: "board-user-1",
+        authorType: "user",
+        body: "Reply body",
+        metadata: {
+          version: 1,
+          sections: [],
+          replyTo: {
+            commentId: targetCommentId,
+            authorType: "user",
+            authorAgentId: null,
+            authorUserId: "board-user-1",
+            excerpt: targetBody.slice(0, 200),
+            excerptTruncated: true,
+          },
+        },
+        createdAt: new Date("2026-07-13T00:01:00.000Z"),
+      },
+    ]);
+
+    const wakePayload = await buildPaperclipWakePayload({
+      db,
+      companyId,
+      contextSnapshot: {
+        issueId,
+        commentId: replyCommentId,
+        wakeCommentIds: [replyCommentId],
+        wakeReason: "issue_commented",
+      },
+    });
+
+    expect(wakePayload?.comments).toEqual([
+      expect.objectContaining({
+        id: replyCommentId,
+        replyToComment: {
+          id: targetCommentId,
+          author: { type: "user", id: "board-user-1" },
+          createdAt: "2026-07-13T00:00:00.000Z",
+          body: targetBody.slice(0, 4_000),
+          bodyTruncated: true,
+        },
+      }),
+    ]);
+  });
+
+  it("stores a server-authored truncated reply snapshot", async () => {
+    const { companyId, issueId } = await seedIssue();
+    const targetCommentId = randomUUID();
+    const targetBody = "x".repeat(205);
+    await db.insert(issueComments).values({
+      id: targetCommentId,
+      companyId,
+      issueId,
+      authorType: "user",
+      authorUserId: "board-user-1",
+      body: targetBody,
+    });
+
+    const response = await request(createApp(companyId))
+      .post(`/api/issues/${issueId}/comments`)
+      .send({
+        body: "Reply body",
+        metadata: {
+          replyTo: {
+            commentId: targetCommentId,
+          },
+        },
+      });
+
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    expect(response.body.metadata).toEqual({
+      version: 1,
+      sections: [],
+      replyTo: {
+        commentId: targetCommentId,
+        authorType: "user",
+        authorAgentId: null,
+        authorUserId: "board-user-1",
+        excerpt: "x".repeat(200),
+        excerptTruncated: true,
+      },
+    });
   });
 
   it("excludes deleted comment bodies from company search", async () => {
